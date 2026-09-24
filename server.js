@@ -20,6 +20,9 @@ const MAX_IMAGES_PER_PRODUCT = 6;
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
+// Indique a Express qu'il est derriere le reverse-proxy Render (permet aux cookies secure HTTPS de fonctionner)
+app.set('trust proxy', 1);
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(uploadsDir));
@@ -30,6 +33,7 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
+    sameSite: 'lax',
     maxAge: 1000 * 60 * 60 * 8, // 8h
     secure: process.env.NODE_ENV === 'production'
   }
