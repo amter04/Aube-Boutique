@@ -574,14 +574,82 @@ button { font-family: inherit; cursor: pointer; }
   background: #F1E4CE; color: #7A5A1E; font-size: 12.5px;
   padding: 10px 12px; border-radius: var(--radius); margin-bottom: 14px;
 }
-#test-checkout-form .field { margin-bottom: 12px; }
-#test-checkout-form .field label { display: block; font-size: 12.5px; margin-bottom: 5px; color: #4a433c; }
-#test-checkout-form .field input {
+.field { margin-bottom: 12px; }
+.field label { display: block; font-size: 12.5px; margin-bottom: 5px; color: #4a433c; }
+.field input {
   width: 100%; padding: 9px 11px; border: 1px solid var(--line); background: #fff;
   font-family: inherit; font-size: 14px; border-radius: var(--radius);
 }
-#test-checkout-form .field-row { display: flex; gap: 10px; }
-#test-checkout-form .field-row .field { flex: 1; }
+.field-row { display: flex; gap: 10px; }
+.field-row .field { flex: 1; }
+.error-text { color: var(--err); font-size: 13px; margin: 8px 0 0; min-height: 1px; }
+.hint { color: #77706A; font-size: 12.5px; margin: 10px 0 0; }
+.link-btn {
+  background: none; border: none; padding: 0; font: inherit; font-size: inherit;
+  color: var(--wine); text-decoration: underline; cursor: pointer;
+}
+.check-line {
+  display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: #4a433c;
+  margin: 4px 0 10px; cursor: pointer;
+}
+.check-line input { margin-top: 3px; }
+
+/* ---------- Comptes clients / fidelite ---------- */
+.icon-only-btn.logged-in { border-color: var(--wine); color: var(--wine); }
+
+.account-box {
+  background: var(--paper-raised); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 12px 14px; margin-bottom: 16px; font-size: 13.5px;
+}
+.account-box .acc-name { font-size: 15px; margin-bottom: 2px; }
+.account-box .acc-email { color: #77706A; font-size: 12.5px; margin-bottom: 8px; }
+.account-box .acc-logout {
+  background: none; border: none; padding: 0; font-size: 12.5px; color: var(--wine);
+  text-decoration: underline; cursor: pointer;
+}
+
+.points-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--wine); color: var(--paper);
+  padding: 4px 12px; border-radius: 999px; font-size: 12.5px;
+}
+
+.loyalty-box {
+  background: #F1E4CE; border-radius: var(--radius); padding: 12px 14px; margin: 4px 0 16px;
+  font-size: 13px; color: #4a433c;
+}
+.loyalty-box label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.loyalty-box input[type="checkbox"] { margin-top: 3px; }
+.loyalty-box .lb-note { color: #77706A; font-size: 12px; margin: 6px 0 0 24px; }
+
+/* ---------- Auth modal ---------- */
+.auth-card { grid-template-columns: 1fr !important; max-width: 420px; }
+.auth-tabs { display: flex; gap: 8px; margin-bottom: 24px; border-bottom: 1px solid var(--line); }
+.auth-tab {
+  background: none; border: none; padding: 10px 4px 12px; font-size: 14px; color: #77706A;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.auth-tab.active { color: var(--ink); border-bottom-color: var(--wine); }
+.auth-form .btn { margin-top: 6px; }
+
+/* ---------- Account drawer ---------- */
+.account-hero { text-align: center; padding: 8px 0 22px; border-bottom: 1px solid var(--line); margin-bottom: 20px; }
+.account-hero .acc-name { font-size: 19px; margin-bottom: 4px; }
+.account-hero .acc-email { color: #77706A; font-size: 13px; margin-bottom: 14px; }
+.account-hero .points-value { font-size: 30px; font-family: 'Fraunces', serif; color: var(--wine); }
+.account-hero .points-label { font-size: 12.5px; color: #77706A; }
+.account-hero .points-worth { font-size: 12.5px; color: #77706A; margin-top: 2px; }
+
+.account-section-title { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #918A80; margin: 0 0 12px; }
+.mini-order {
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px; font-size: 13.5px;
+}
+.mini-order .mo-top { display: flex; justify-content: space-between; margin-bottom: 4px; }
+.mini-order .mo-date { color: #77706A; font-size: 12px; }
+.mini-order .mo-status { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; background: var(--paper-raised); }
+.mini-order .mo-points { color: var(--wine); font-size: 12px; margin-top: 4px; }
+
+.account-logout-btn { width: 100%; justify-content: center; margin-top: 22px; }
 
 /* ========================================================
    ADAPTATION MOBILE & RESPONSIVE (écrans <= 768px)
