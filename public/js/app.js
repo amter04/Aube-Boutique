@@ -6,12 +6,14 @@
     activeCategory: 'Tout',
     searchQuery: '',
     sortMode: 'new',
-    config: { paypalClientId: '', currency: 'EUR', shippingFlatCents: 0, freeShippingThresholdCents: null, testCheckout: true },
+    config: { paypalClientId: '', currency: 'EUR', shippingFlatCents: 0, freeShippingThresholdCents: null, testCheckout: true, loyalty: {} },
     paypalLoaded: false,
     paypalButtonsInstance: null,
     modalProduct: null,
     modalSelectedSize: null,
-    modalImageIndex: 0
+    modalImageIndex: 0,
+    customer: null, // compte client connecte (ou null si invitee)
+    redeemPoints: false // case "utiliser mes points" cochee au checkout
   };
 
   const BADGE_LABELS = { promo: 'Promo', flash: 'Vente flash', tendance: 'Tendance' };
