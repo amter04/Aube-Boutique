@@ -26,6 +26,7 @@
       <div class="search-box">
         <input type="search" id="search-input" placeholder="Rechercher une pièce…" aria-label="Rechercher">
       </div>
+      <button class="icon-only-btn" id="open-account" title="Mon compte" aria-label="Mon compte">👤</button>
       <button class="icon-only-btn" id="open-wishlist" title="Mes favoris" aria-label="Mes favoris">
         ♡ <span class="cart-count" id="wishlist-count">0</span>
       </button>
@@ -111,13 +112,31 @@
     <div id="checkout-area">
       <div id="test-checkout-form" style="display:none;">
         <p class="test-mode-note">🧪 Mode test — aucun paiement réel n'est demandé pour l'instant. La commande est enregistrée normalement pour que tu puisses tester le tunnel d'achat.</p>
-        <div class="field"><label for="cf-name">Nom complet</label><input type="text" id="cf-name" required></div>
-        <div class="field"><label for="cf-email">Email</label><input type="email" id="cf-email" required></div>
+
+        <div id="checkout-account-box" class="account-box" style="display:none;"></div>
+
+        <div id="checkout-guest-fields">
+          <div class="field"><label for="cf-name">Nom complet</label><input type="text" id="cf-name" required></div>
+          <div class="field"><label for="cf-email">Email</label><input type="email" id="cf-email" required></div>
+          <label class="check-line">
+            <input type="checkbox" id="cf-create-account">
+            Créer un compte pour cumuler des points de fidélité
+          </label>
+          <div class="field" id="checkout-create-password-field" style="display:none;">
+            <label for="cf-password">Choisis un mot de passe</label>
+            <input type="password" id="cf-password" minlength="6">
+          </div>
+          <p class="hint">Déjà cliente ? <button type="button" class="link-btn" id="checkout-open-login">Se connecter</button> pour gagner des points sur cette commande.</p>
+        </div>
+
         <div class="field"><label for="cf-address">Adresse</label><input type="text" id="cf-address"></div>
         <div class="field-row">
           <div class="field"><label for="cf-postal">Code postal</label><input type="text" id="cf-postal"></div>
           <div class="field"><label for="cf-city">Ville</label><input type="text" id="cf-city"></div>
         </div>
+
+        <div id="checkout-loyalty-box" class="loyalty-box" style="display:none;"></div>
+
         <button class="btn wine" id="test-checkout-submit" style="width:100%; justify-content:center;">Valider la commande (mode test)</button>
         <p class="error-text" id="checkout-error"></p>
       </div>
@@ -136,6 +155,43 @@
   </div>
   <div class="drawer-body" id="wishlist-items"></div>
 </aside>
+
+<!-- Account drawer -->
+<div class="overlay" id="account-overlay"></div>
+<aside class="drawer" id="account-drawer">
+  <div class="drawer-head">
+    <h3>Mon compte</h3>
+    <button class="icon-btn" id="close-account">&times;</button>
+  </div>
+  <div class="drawer-body" id="account-body"></div>
+</aside>
+
+<!-- Auth modal (connexion / creation de compte) -->
+<div class="modal" id="auth-modal">
+  <div class="modal-card auth-card">
+    <div class="modal-info" style="grid-column:1/-1;">
+      <button class="modal-close" id="auth-close">&times;</button>
+      <div class="auth-tabs">
+        <button type="button" class="auth-tab active" data-tab="login">Se connecter</button>
+        <button type="button" class="auth-tab" data-tab="register">Créer un compte</button>
+      </div>
+      <form id="login-form" class="auth-form">
+        <div class="field"><label for="li-email">Email</label><input type="email" id="li-email" required></div>
+        <div class="field"><label for="li-password">Mot de passe</label><input type="password" id="li-password" required></div>
+        <p class="error-text" id="login-error"></p>
+        <button type="submit" class="btn wine" style="width:100%; justify-content:center;">Se connecter</button>
+      </form>
+      <form id="register-form" class="auth-form" style="display:none;">
+        <div class="field"><label for="re-name">Nom complet</label><input type="text" id="re-name" required></div>
+        <div class="field"><label for="re-email">Email</label><input type="email" id="re-email" required></div>
+        <div class="field"><label for="re-password">Mot de passe (6 caractères min.)</label><input type="password" id="re-password" minlength="6" required></div>
+        <p class="error-text" id="register-error"></p>
+        <button type="submit" class="btn wine" style="width:100%; justify-content:center;">Créer mon compte</button>
+      </form>
+      <p class="hint">Tu peux aussi commander sans compte, en tant qu'invitée, depuis ton panier.</p>
+    </div>
+  </div>
+</div>
 
 <!-- Product detail modal -->
 <div class="modal" id="product-modal">
