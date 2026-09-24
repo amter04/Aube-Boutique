@@ -582,3 +582,140 @@ button { font-family: inherit; cursor: pointer; }
 }
 #test-checkout-form .field-row { display: flex; gap: 10px; }
 #test-checkout-form .field-row .field { flex: 1; }
+
+/* ========================================================
+   ADAPTATION MOBILE & RESPONSIVE (écrans <= 768px)
+   ======================================================== */
+
+/* 1. Sécurité générale contre les débordements */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  overflow-x: hidden; /* Empêche tout scroll horizontal involontaire */
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+@media (max-width: 768px) {
+  /* Conteneur global */
+  .wrap {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+
+  /* 2. Header : réorganisation compacte sur smartphone */
+  .site-header .wrap {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+
+  .site-header .main-nav {
+    order: 3;
+    width: 100%;
+    display: flex;
+    gap: 14px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    font-size: 14px;
+  }
+
+  .site-header .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .site-header .search-box input {
+    width: 130px;
+    font-size: 13px;
+    padding: 6px 10px;
+  }
+
+  /* 3. Hero : empilement texte + photo */
+  .hero {
+    display: flex !important;
+    flex-direction: column !important;
+    padding: 24px 16px !important;
+    gap: 20px;
+  }
+
+  .hero-text h1 {
+    font-size: 26px !important;
+    line-height: 1.25 !important;
+  }
+
+  .hero-text .lede {
+    font-size: 15px !important;
+  }
+
+  .hero-media img {
+    width: 100%;
+    max-height: 380px;
+    object-fit: cover;
+    border-radius: 8px;
+  }
+
+  /* 4. Grille de produits : 2 colonnes bien lisibles */
+  .grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 12px !important;
+  }
+
+  .filters-row {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 12px;
+  }
+
+  .sort-select {
+    width: 100%;
+  }
+
+  /* 5. Modale produit : passage en 1 colonne déroulante */
+  .modal-card {
+    display: flex !important;
+    flex-direction: column !important;
+    max-height: 90vh !important;
+    overflow-y: auto !important;
+    width: 95% !important;
+    margin: auto !important;
+    padding: 16px !important;
+  }
+
+  .modal-media, .modal-info {
+    width: 100% !important;
+  }
+
+  .modal-main-img img {
+    max-height: 320px;
+    object-fit: contain;
+    margin: 0 auto;
+  }
+
+  /* 6. Tiroirs (Panier & Favoris) en pleine largeur */
+  .drawer {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* 7. Tableau du guide des tailles scrollable */
+  .table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
