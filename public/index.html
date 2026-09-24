@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aube — Vêtements pour femme</title>
+<meta name="description" content="Aube, une garde-robe pensée pour durer. Pièces intemporelles pour femme, livrées chez vous.">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap">
+    <a href="/" class="logo">Aube</a>
+    <nav class="main-nav">
+      <div class="dropdown" id="cat-dropdown">
+        <button class="dropdown-trigger" id="cat-dropdown-btn">
+          Catégories <span class="chevron">⌄</span>
+        </button>
+        <div class="dropdown-panel" id="cat-dropdown-panel"></div>
+      </div>
+      <a href="#trending">En ce moment</a>
+      <a href="#about">L'atelier</a>
+    </nav>
+    <div class="header-actions">
+      <div class="search-box">
+        <input type="search" id="search-input" placeholder="Rechercher une pièce…" aria-label="Rechercher">
+      </div>
+      <button class="icon-only-btn" id="open-wishlist" title="Mes favoris" aria-label="Mes favoris">
+        ♡ <span class="cart-count" id="wishlist-count">0</span>
+      </button>
+      <button class="cart-btn" id="open-cart">
+        Panier <span class="cart-count" id="cart-count">0</span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="hero-text">
+    <p class="kicker">Nouvelle saison</p>
+    <h1>Des pièces qui traversent les saisons, pas seulement les tendances.</h1>
+    <p class="lede">Une petite collection, choisie avec soin : des matières qui vieillissent bien et des coupes qu'on garde longtemps.</p>
+    <a href="#collection" class="btn wine">Voir la collection</a>
+  </div>
+  <div class="hero-media">
+    <img src="https://images.unsplash.com/photo-1509631179647-0177331693ae?q=80&w=1200&auto=format&fit=crop" alt="Femme portant une pièce Aube">
+  </div>
+</section>
+
+<main>
+  <section class="section" id="trending" style="display:none;">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>En ce moment</h2>
+        <span class="count" id="trending-count"></span>
+      </div>
+      <div class="grid" id="trending-grid"></div>
+    </div>
+  </section>
+
+  <section class="section" id="collection">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>La collection</h2>
+        <span class="count" id="product-count"></span>
+      </div>
+      <div class="filters-row">
+        <div class="filters" id="filters"></div>
+        <select id="sort-select" class="sort-select" aria-label="Trier">
+          <option value="new">Nouveautés</option>
+          <option value="price-asc">Prix croissant</option>
+          <option value="price-desc">Prix décroissant</option>
+          <option value="name-asc">Nom (A→Z)</option>
+        </select>
+      </div>
+      <div class="grid" id="product-grid">
+        <!-- Rempli par app.js -->
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="about" style="padding-top:0;">
+    <div class="wrap" style="max-width:640px;">
+      <h2 style="font-size:26px; margin-bottom:16px;">L'atelier</h2>
+      <p style="color:#4a433c;">Aube est une boutique indépendante. Chaque pièce est ajoutée à la main par notre équipe — la collection s'agrandit régulièrement, alors revenez y jeter un œil.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer" id="footer">
+  <div class="wrap" style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:12px; width:100%;">
+    <span>© <span id="year"></span> Aube</span>
+    <span id="footer-payment-note">Paiement sécurisé par PayPal · Carte bancaire acceptée</span>
+  </div>
+</footer>
+
+<!-- Cart drawer -->
+<div class="overlay" id="overlay"></div>
+<aside class="drawer" id="cart-drawer">
+  <div class="drawer-head">
+    <h3>Votre panier</h3>
+    <button class="icon-btn" id="close-cart">&times;</button>
+  </div>
+  <div class="drawer-body" id="cart-items"></div>
+  <div class="drawer-foot" id="cart-foot">
+    <div class="cart-total-row small"><span>Sous-total</span><span id="cart-subtotal">0,00&nbsp;€</span></div>
+    <div class="cart-total-row small"><span>Livraison</span><span id="cart-shipping">0,00&nbsp;€</span></div>
+    <div class="cart-total-row"><span>Total</span><span id="cart-total">0,00&nbsp;€</span></div>
+
+    <div id="checkout-area">
+      <div id="test-checkout-form" style="display:none;">
+        <p class="test-mode-note">🧪 Mode test — aucun paiement réel n'est demandé pour l'instant. La commande est enregistrée normalement pour que tu puisses tester le tunnel d'achat.</p>
+        <div class="field"><label for="cf-name">Nom complet</label><input type="text" id="cf-name" required></div>
+        <div class="field"><label for="cf-email">Email</label><input type="email" id="cf-email" required></div>
+        <div class="field"><label for="cf-address">Adresse</label><input type="text" id="cf-address"></div>
+        <div class="field-row">
+          <div class="field"><label for="cf-postal">Code postal</label><input type="text" id="cf-postal"></div>
+          <div class="field"><label for="cf-city">Ville</label><input type="text" id="cf-city"></div>
+        </div>
+        <button class="btn wine" id="test-checkout-submit" style="width:100%; justify-content:center;">Valider la commande (mode test)</button>
+        <p class="error-text" id="checkout-error"></p>
+      </div>
+      <div id="paypal-buttons-container"></div>
+    </div>
+    <p class="checkout-note" id="checkout-note">Paiement par carte ou compte PayPal, traité en toute sécurité par PayPal.</p>
+  </div>
+</aside>
+
+<!-- Wishlist drawer -->
+<div class="overlay" id="wishlist-overlay"></div>
+<aside class="drawer" id="wishlist-drawer">
+  <div class="drawer-head">
+    <h3>Mes favoris</h3>
+    <button class="icon-btn" id="close-wishlist">&times;</button>
+  </div>
+  <div class="drawer-body" id="wishlist-items"></div>
+</aside>
+
+<!-- Product detail modal -->
+<div class="modal" id="product-modal">
+  <div class="modal-card">
+    <div class="modal-media">
+      <button class="wishlist-heart" id="modal-wishlist-btn" title="Ajouter aux favoris">♡</button>
+      <div class="modal-main-img" id="modal-main-img">
+        <img id="modal-img" src="" alt="">
+        <span class="zoom-hint">🔍 Cliquer pour zoomer</span>
+      </div>
+      <div class="modal-thumbs" id="modal-thumbs"></div>
+    </div>
+    <div class="modal-info">
+      <button class="modal-close" id="modal-close">&times;</button>
+      <div class="modal-badges" id="modal-badges"></div>
+      <h2 id="modal-name"></h2>
+      <p class="price" id="modal-price"></p>
+      <p class="desc" id="modal-desc"></p>
+      <div class="size-picker" id="modal-sizes"></div>
+      <button type="button" class="size-guide-link" id="size-guide-link">Guide des tailles</button>
+      <p class="stock-note" id="modal-stock-note"></p>
+      <button class="btn wine" id="modal-add">Ajouter au panier</button>
+      <button type="button" class="share-link" id="modal-share">Copier le lien de cette pièce</button>
+    </div>
+  </div>
+</div>
+
+<!-- Lightbox zoom -->
+<div class="lightbox" id="lightbox">
+  <button class="lightbox-close" id="lightbox-close">&times;</button>
+  <img id="lightbox-img" src="" alt="">
+</div>
+
+<!-- Size guide modal -->
+<div class="modal" id="size-guide-modal">
+  <div class="modal-card size-guide-card">
+    <div class="modal-info" style="grid-column:1/-1;">
+      <button class="modal-close" id="size-guide-close">&times;</button>
+      <h2>Guide des tailles</h2>
+      <p class="desc">Mesures données à titre indicatif (en cm), à plat. En cas de doute entre deux tailles, on te conseille de prendre la taille au-dessus.</p>
+      <div class="table-scroll">
+        <table class="size-table">
+          <thead>
+            <tr><th>Taille</th><th>Poitrine</th><th>Taille</th><th>Hanches</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>S</td><td>84–88</td><td>66–70</td><td>90–94</td></tr>
+            <tr><td>M</td><td>89–93</td><td>71–75</td><td>95–99</td></tr>
+            <tr><td>L</td><td>94–99</td><td>76–81</td><td>100–105</td></tr>
+            <tr><td>XL</td><td>100–106</td><td>82–88</td><td>106–112</td></tr>
+            <tr><td>2XL</td><td>107–113</td><td>89–95</td><td>113–119</td></tr>
+            <tr><td>3XL</td><td>114–120</td><td>96–102</td><td>120–126</td></tr>
+            <tr><td>4XL</td><td>121–127</td><td>103–109</td><td>127–133</td></tr>
+            <tr><td>S/M</td><td>84–93</td><td>66–75</td><td>90–99</td></tr>
+            <tr><td>M/L</td><td>89–99</td><td>71–81</td><td>95–105</td></tr>
+            <tr><td>L/XL</td><td>94–106</td><td>76–88</td><td>100–112</td></tr>
+            <tr><td>TU</td><td colspan="3">Taille unique — convient en général du S au L. Voir la description de la pièce pour plus de détails.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint">Comment prendre ses mesures : poitrine à l'endroit le plus fort, taille au niveau le plus fin, hanches à l'endroit le plus fort, mètre ruban à plat sans serrer.</p>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/js/app.js"></script>
+</body>
+</html>

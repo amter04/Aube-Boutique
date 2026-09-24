@@ -1,0 +1,38 @@
+# Blueprint Render : permet de deployer ce projet en quelques clics via
+# https://dashboard.render.com/blueprints -> "New Blueprint Instance" -> connecte ce depot.
+# Render lit ce fichier et cree automatiquement le service ci-dessous ; il ne reste plus qu'a
+# renseigner les variables marquees "sync: false" (secrets) dans le tableau de bord Render.
+services:
+  - type: web
+    name: aube-boutique
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: CURRENCY
+        value: EUR
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM
+        sync: false
+      - key: PUBLIC_URL
+        sync: false
