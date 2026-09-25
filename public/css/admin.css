@@ -158,9 +158,12 @@ body.admin { background: var(--paper); }
   font-size: 13px; color: #918A80; cursor: pointer; text-align: center; padding: 6px;
 }
 #p-images { display: none; }  
-/* ---------- Affichage Téléphone & Tablette ---------- */
+/* ==================================================
+   RESPONSIVE MOBILE & TABLETTE — Admin Aube
+   ================================================== */
 @media (max-width: 860px) {
-  /* En-tête et conteneur */
+
+  /* ---------- En-tête ---------- */
   .admin-header .wrap {
     height: auto;
     padding: 12px 16px;
@@ -169,11 +172,37 @@ body.admin { background: var(--paper); }
     gap: 10px;
     min-width: 0;
   }
-  .admin-header .wrap > * {
+  .admin-header .wrap > span {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
     min-width: 0;
   }
+  .admin-header .logo {
+    white-space: nowrap;
+  }
+  .admin-tag {
+    white-space: nowrap;
+  }
+  /* Contre les styles inline du bouton déconnexion */
+  #logout-btn {
+    padding: 10px 14px !important;
+    font-size: 13px !important;
+    min-height: 40px;
+  }
 
-  /* Onglets : défilement fluide au doigt horizontal sans casser la ligne */
+  /* ---------- Écran de connexion ---------- */
+  .login-screen {
+    padding: 20px 16px;
+  }
+  .login-card {
+    width: 100%;
+    max-width: 100%;
+    padding: 24px 18px;
+  }
+
+  /* ---------- Onglets ---------- */
   .admin-tabs {
     overflow-x: auto;
     white-space: nowrap;
@@ -186,58 +215,93 @@ body.admin { background: var(--paper); }
   }
   .admin-tab {
     flex-shrink: 0;
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-    padding: 0 14px;
+    min-height: 42px;
   }
 
-  /* Passage de la grille 2 colonnes en 1 seule colonne */
+  /* ---------- Layout général ---------- */
+  #admin-main {
+    padding-top: 20px !important;
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-bottom: 60px !important;
+  }
   .admin-layout {
     grid-template-columns: 1fr;
     gap: 20px;
   }
-
   .panel {
     padding: 18px 14px;
+    max-width: 100% !important; /* écrase les max-width inline (460px / 820px) */
   }
 
-  /* Les champs côte à côte passent l'un sous l'autre */
+  /* ---------- En-têtes de panel avec bouton (Commandes, Clients) ---------- */
+  .panel > div[style*="justify-content:space-between"] {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  /* ---------- Formulaire produit ---------- */
   .field-row {
     flex-direction: column;
     gap: 0;
   }
-
-  /* Évite le zoom automatique sur iPhone lors de la saisie */
   .field input,
   .field textarea,
   .field select {
-    font-size: 16px;
+    font-size: 16px; /* évite le zoom auto iPhone */
+    min-height: 44px;
+  }
+  .field textarea {
+    min-height: 90px;
+  }
+
+  /* Ligne Catégorie (select + bouton "+ Nouvelle") */
+  #p-category {
+    min-height: 44px;
+  }
+  #new-cat-btn {
+    padding: 10px 12px !important;
+    font-size: 13px !important;
     min-height: 44px;
   }
 
-  /* Boutons : cible tactile confortable */
-  button,
-  .btn,
-  a.btn {
-    min-height: 44px;
+  /* Grille photos : plus petites vignettes sur mobile */
+  .photo-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
   }
 
-  /* Tableau produit : défilement horizontal sans faire déborder la page,
-     avec un indice visuel de scroll */
-  .product-table-wrap {
-    position: relative;
+  /* Grille tailles/stock : au moins 2 colonnes lisibles */
+  .size-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
   }
+
+  /* Boutons Ajouter / Annuler : passent en pleine largeur si étroit */
+  #product-form > div[style*="display:flex; gap:10px"] {
+    flex-wrap: wrap;
+  }
+  #product-form > div[style*="display:flex; gap:10px"] .btn {
+    flex: 1 1 auto;
+    min-height: 46px;
+    justify-content: center;
+  }
+
+  /* ---------- Tableaux (Catalogue / Clients) ---------- */
   .product-table {
     display: block;
+    width: 100%;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     white-space: nowrap;
-    mask-image: linear-gradient(to right, black 92%, transparent 100%);
-    -webkit-mask-image: linear-gradient(to right, black 92%, transparent 100%);
+  }
+  .product-table thead,
+  .product-table tbody {
+    display: table;
+    width: 100%;
   }
 
-  /* Grille des statistiques (Dashboard) */
+  /* ---------- Dashboard ---------- */
   .stats-grid {
     grid-template-columns: repeat(2, 1fr);
     gap: 12px;
@@ -249,7 +313,7 @@ body.admin { background: var(--paper); }
     font-size: 24px;
   }
 
-  /* Lignes de commandes */
+  /* ---------- Commandes ---------- */
   .orders-list .order-row .top {
     flex-direction: column;
     align-items: flex-start;
@@ -257,22 +321,49 @@ body.admin { background: var(--paper); }
   }
   .status-pill {
     margin-left: 0;
-    min-height: 28px;
+    min-height: 26px;
     display: inline-flex;
     align-items: center;
   }
+  /* Bouton export CSV en pleine largeur sur mobile */
+  a.btn.secondary[download] {
+    width: 100%;
+    justify-content: center;
+    padding: 10px 16px !important;
+    font-size: 13px !important;
+  }
+
+  /* ---------- Réglages ---------- */
+  #settings-form .check-line {
+    align-items: flex-start;
+    line-height: 1.4;
+  }
+  #s-free-threshold {
+    width: 100%;
+  }
 }
 
-/* ---------- Très petits écrans ---------- */
+/* ==================================================
+   TRÈS PETITS ÉCRANS (< 380px)
+   ================================================== */
 @media (max-width: 380px) {
   .stats-grid {
     grid-template-columns: 1fr;
+  }
+  .photo-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .size-grid {
+    grid-template-columns: repeat(2, 1fr);
   }
   .panel {
     padding: 14px 10px;
   }
   .admin-header .wrap {
     padding: 10px 12px;
+  }
+  .login-card {
+    padding: 20px 14px;
   }
 }
 
