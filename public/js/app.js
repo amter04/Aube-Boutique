@@ -64,6 +64,179 @@
     state.products = await res.json();
   }
 
+  // ---------- Comptes clients ----------
+  async function loadCustomer() {
+    try {
+      const res = await fetch('/api/auth/me');
+      const data = await res.json();
+      state.customer = data.customer || null;
+    } catch (e) {
+      state.customer = null;
+    }
+    renderAccountButton();
+  }
+
+  function renderAccountButton() {
+    const btn = el('#open-account');
+    btn.classList.toggle('logged-in', !!state.customer);
+    btn.title = state.customer ? `Mon compte (${state.customer.name})` : 'Mon compte';
+  }
+
+  async function logout() {
+    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
+    state.customer = null;
+    state.redeemPoints = false;
+    renderAccountButton();
+    closeAccountDrawer();
+    if (drawer.classList.contains('open')) renderCartDrawer();
+    showToast('Déconnectée');
+  }
+
+  function orderStatusLabel(status) {
+    const map = { paid: 'Payée', created: 'En attente', cancelled: 'Annulée' };
+    return map[status] || status;
+  }
+
+  // ---------- Auth modal (connexion / creation de compte) ----------
+  const authModal = el('#auth-modal');
+  function openAuthModal(tab = 'login') {
+    switchAuthTab(tab);
+    authModal.classList.add('open');
+  }
+  function closeAuthModal() { authModal.classList.remove('open'); }
+  el('#auth-close').addEventListener('click', closeAuthModal);
+  authModal.addEventListener('click', (e) => { if (e.target === authModal) closeAuthModal(); });
+
+  function switchAuthTab(tab) {
+    el('#login-form').style.display = tab === 'login' ? 'block' : 'none';
+    el('#register-form').style.display = tab === 'register' ? 'block' : 'none';
+    document.querySelectorAll('.auth-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    el('#login-error').textContent = '';
+    el('#register-error').textContent = '';
+  }
+  document.querySelectorAll('.auth-tab').forEach(b => b.addEventListener('click', () => switchAuthTab(b.dataset.tab)));
+
+  el('#login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = el('#li-email').value.trim();
+    const password = el('#li-password').value;
+    const errorEl = el('#login-error');
+    errorEl.textContent = '';
+    const btn = e.target.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+      if (!res.ok) { errorEl.textContent = data.error || 'Connexion impossible.'; return; }
+      state.customer = data.customer;
+      renderAccountButton();
+      closeAuthModal();
+      if (drawer.classList.contains('open')) renderCartDrawer();
+      showToast(`Bon retour, ${data.customer.name.split(' ')[0]} !`);
+    } catch (err) {
+      errorEl.textContent = 'Erreur réseau, réessaie.';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  el('#register-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = el('#re-name').value.trim();
+    const email = el('#re-email').value.trim();
+    const password = el('#re-password').value;
+    const errorEl = el('#register-error');
+    errorEl.textContent = '';
+    const btn = e.target.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password })
+      });
+      const data = await res.json();
+      if (!res.ok) { errorEl.textContent = data.error || 'Inscription impossible.'; return; }
+      state.customer = data.customer;
+      renderAccountButton();
+      closeAuthModal();
+      if (drawer.classList.contains('open')) renderCartDrawer();
+      showToast(`Bienvenue, ${data.customer.name.split(' ')[0]} !`);
+    } catch (err) {
+      errorEl.textContent = 'Erreur réseau, réessaie.';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ---------- Account drawer ----------
+  const accountOverlay = el('#account-overlay');
+  const accountDrawer = el('#account-drawer');
+  function openAccountDrawer() {
+    accountOverlay.classList.add('open');
+    accountDrawer.classList.add('open');
+    renderAccountDrawer();
+  }
+  function closeAccountDrawer() {
+    accountOverlay.classList.remove('open');
+    accountDrawer.classList.remove('open');
+  }
+  el('#open-account').addEventListener('click', () => {
+    if (state.customer) openAccountDrawer();
+    else openAuthModal('login');
+  });
+  el('#close-account').addEventListener('click', closeAccountDrawer);
+  accountOverlay.addEventListener('click', closeAccountDrawer);
+
+  async function renderAccountDrawer() {
+    if (!state.customer) { closeAccountDrawer(); return; }
+    const body = el('#account-body');
+    const loyalty = state.config.loyalty || {};
+    const worth = ((state.customer.points || 0) * (loyalty.pointValueCents || 0)) / 100;
+    body.innerHTML = `
+      <div class="account-hero">
+        <div class="acc-name">${state.customer.name}</div>
+        <div class="acc-email">${state.customer.email}</div>
+        <div class="points-value">${state.customer.points || 0}</div>
+        <div class="points-label">points de fidélité</div>
+        <div class="points-worth">soit ${fmt(worth)} de réduction à utiliser</div>
+      </div>
+      <p class="account-section-title">Mes commandes</p>
+      <div id="account-orders-list"><p class="hint">Chargement…</p></div>
+      <button class="btn secondary account-logout-btn" id="account-logout-btn">Se déconnecter</button>
+    `;
+    el('#account-logout-btn').addEventListener('click', logout);
+
+    try {
+      const res = await fetch('/api/account/orders');
+      const orders = await res.json();
+      const list = el('#account-orders-list');
+      if (!orders.length) {
+        list.innerHTML = `<p class="hint">Aucune commande pour l'instant — tes achats apparaîtront ici.</p>`;
+        return;
+      }
+      list.innerHTML = orders.map(o => `
+        <div class="mini-order">
+          <div class="mo-top">
+            <span>Commande n°${o.id}</span>
+            <span class="mo-status">${orderStatusLabel(o.status)}</span>
+          </div>
+          <div class="mo-date">${new Date(o.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })} — ${fmt(o.total)}</div>
+          ${o.pointsEarned ? `<div class="mo-points">+${o.pointsEarned} points gagnés${o.pointsRedeemed ? `, ${o.pointsRedeemed} utilisés` : ''}</div>` : ''}
+        </div>
+      `).join('');
+    } catch (e) {
+      el('#account-orders-list').innerHTML = `<p class="hint">Impossible de charger les commandes pour le moment.</p>`;
+    }
+  }
+
+  el('#checkout-open-login').addEventListener('click', () => openAuthModal('login'));
+  el('#cf-create-account').addEventListener('change', (e) => {
+    el('#checkout-create-password-field').style.display = e.target.checked ? 'block' : 'none';
+  });
+
   // ---------- Badges / promo helpers ----------
   function badgesHtml(p) {
     if (!p.badges || p.badges.length === 0) return '';
@@ -396,6 +569,8 @@
   lightbox.addEventListener('transitionend', () => {}, true);
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && lightbox.classList.contains('open')) lightbox.classList.remove('open');
+    if (e.key === 'Escape' && authModal.classList.contains('open')) closeAuthModal();
+    if (e.key === 'Escape' && accountDrawer.classList.contains('open')) closeAccountDrawer();
   });
 
   // ---------- Size guide ----------
@@ -567,28 +742,103 @@
     if (state.config.testCheckout) {
       el('#test-checkout-form').style.display = 'block';
       el('#paypal-buttons-container').innerHTML = '';
+      renderCheckoutAccountArea();
     } else {
       el('#test-checkout-form').style.display = 'none';
       renderPaypalButtons();
     }
   }
 
+  // ---------- Checkout : zone compte / invitee / fidelite ----------
+  function checkoutMaxRedeemablePoints() {
+    const loyalty = state.config.loyalty || {};
+    if (!state.customer || !loyalty.pointValueCents) return 0;
+    const subtotalCents = Math.round(cartSubtotal() * 100);
+    const maxByBalance = state.customer.points || 0;
+    const maxBySubtotal = Math.floor(subtotalCents / loyalty.pointValueCents);
+    return Math.max(0, Math.min(maxByBalance, maxBySubtotal));
+  }
+
+  function renderCheckoutAccountArea() {
+    const accountBox = el('#checkout-account-box');
+    const guestFields = el('#checkout-guest-fields');
+    const loyaltyBox = el('#checkout-loyalty-box');
+    const loyalty = state.config.loyalty || {};
+
+    if (state.customer) {
+      guestFields.style.display = 'none';
+      accountBox.style.display = 'block';
+      accountBox.innerHTML = `
+        <div class="acc-name">Connectée en tant que ${state.customer.name}</div>
+        <div class="acc-email">${state.customer.email}</div>
+        <button type="button" class="acc-logout">Pas moi, changer de compte</button>
+      `;
+      accountBox.querySelector('.acc-logout').addEventListener('click', async () => {
+        await logout();
+        renderCheckoutAccountArea();
+      });
+
+      const maxRedeem = checkoutMaxRedeemablePoints();
+      const minRedeem = loyalty.minRedeemPoints || 0;
+      if (maxRedeem > 0 && maxRedeem >= minRedeem) {
+        const discount = (maxRedeem * (loyalty.pointValueCents || 0)) / 100;
+        loyaltyBox.style.display = 'block';
+        loyaltyBox.innerHTML = `
+          <label>
+            <input type="checkbox" id="cf-redeem-points" ${state.redeemPoints ? 'checked' : ''}>
+            <span>Utiliser mes ${state.customer.points} points fidélité (− ${fmt(discount)} sur cette commande)</span>
+          </label>
+        `;
+        el('#cf-redeem-points').addEventListener('change', (e) => {
+          state.redeemPoints = e.target.checked;
+        });
+      } else {
+        loyaltyBox.style.display = 'none';
+        state.redeemPoints = false;
+      }
+    } else {
+      accountBox.style.display = 'none';
+      guestFields.style.display = 'block';
+      loyaltyBox.style.display = 'none';
+      state.redeemPoints = false;
+    }
+  }
+
   // ---------- Checkout test (sans paiement) ----------
   el('#test-checkout-submit').addEventListener('click', async () => {
-    const name = el('#cf-name').value.trim();
-    const email = el('#cf-email').value.trim();
-    const address = el('#cf-address').value.trim();
-    const postalCode = el('#cf-postal').value.trim();
-    const city = el('#cf-city').value.trim();
     const errorEl = el('#checkout-error');
     errorEl.textContent = '';
 
-    if (!name || !email) {
-      errorEl.textContent = 'Merci de renseigner au moins ton nom et ton email.';
-      return;
+    const address = el('#cf-address').value.trim();
+    const postalCode = el('#cf-postal').value.trim();
+    const city = el('#cf-city').value.trim();
+
+    let payload;
+    if (state.customer) {
+      payload = {
+        customer: { name: state.customer.name, email: state.customer.email, address, postalCode, city },
+        redeemPoints: state.redeemPoints ? checkoutMaxRedeemablePoints() : 0
+      };
+    } else {
+      const name = el('#cf-name').value.trim();
+      const email = el('#cf-email').value.trim();
+      if (!name || !email) {
+        errorEl.textContent = 'Merci de renseigner au moins ton nom et ton email.';
+        return;
+      }
+      payload = { customer: { name, email, address, postalCode, city } };
+      if (el('#cf-create-account').checked) {
+        const password = el('#cf-password').value;
+        if (!password || password.length < 6) {
+          errorEl.textContent = "Choisis un mot de passe d'au moins 6 caractères pour créer ton compte.";
+          return;
+        }
+        payload.createAccount = true;
+        payload.password = password;
+      }
     }
 
-    const items = Object.keys(state.cart).map(key => {
+    payload.items = Object.keys(state.cart).map(key => {
       const [idStr, size] = key.split('::');
       return { productId: parseInt(idStr, 10), size, qty: state.cart[key] };
     });
@@ -600,7 +850,7 @@
       const res = await fetch('/api/checkout/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items, customer: { name, email, address, postalCode, city } })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (!res.ok) {
@@ -610,7 +860,9 @@
         return;
       }
       state.cart = {};
+      state.redeemPoints = false;
       saveCart();
+      if (!state.customer) { await loadCustomer(); } // recharge si un compte vient d'etre cree pendant la commande
       window.location.href = `/commande/${data.token}`;
     } catch (e) {
       errorEl.textContent = 'Erreur réseau, réessaie.';
@@ -749,7 +1001,7 @@
   (async function init() {
     el('#year').textContent = new Date().getFullYear();
     await loadConfig();
-    await loadProducts();
+    await Promise.all([loadProducts(), loadCustomer()]);
     renderCategoryDropdown();
     renderFilters();
     renderGrid();
