@@ -35,6 +35,7 @@
     <button class="admin-tab active" data-tab="dashboard">Tableau de bord</button>
     <button class="admin-tab" data-tab="products">Produits</button>
     <button class="admin-tab" data-tab="orders">Commandes</button>
+    <button class="admin-tab" data-tab="customers">Clients</button>
     <button class="admin-tab" data-tab="settings">Réglages</button>
   </div>
 
@@ -137,24 +138,66 @@
     </div>
   </section>
 
+  <section id="tab-customers" style="display:none;">
+    <div class="panel" style="max-width:820px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;">
+        <h3 style="margin:0;">Comptes clients</h3>
+        <span class="hint" id="customers-count"></span>
+      </div>
+      <table class="product-table">
+        <thead>
+          <tr><th>Nom</th><th>Email</th><th>Points</th><th>Commandes</th><th>Inscrite le</th></tr>
+        </thead>
+        <tbody id="customer-rows"></tbody>
+      </table>
+      <p class="hint" style="margin-top:14px;">Les points sont attribués et déduits automatiquement à chaque commande, selon le réglage de fidélité ci-dessous (onglet Réglages).</p>
+    </div>
+  </section>
+
   <section id="tab-settings" style="display:none;">
-    <div class="panel" style="max-width:460px;">
-      <h3>Frais de livraison</h3>
-      <form id="settings-form">
-        <div class="field">
-          <label for="s-shipping">Frais de livraison fixes (€)</label>
-          <input type="number" id="s-shipping" step="0.01" min="0" required>
-        </div>
-        <div class="field">
-          <label class="check-line">
-            <input type="checkbox" id="s-free-enabled"> Livraison offerte à partir d'un montant
-          </label>
-          <input type="number" id="s-free-threshold" step="0.01" min="0" placeholder="Ex. 50" style="margin-top:8px;">
-        </div>
-        <button type="submit" class="btn wine">Enregistrer</button>
-        <p class="error-text" id="settings-error"></p>
-        <p class="hint" id="settings-saved" style="color:var(--ok); display:none;">Réglages enregistrés.</p>
-      </form>
+    <div class="admin-layout">
+      <div class="panel" style="max-width:460px;">
+        <h3>Frais de livraison</h3>
+        <form id="settings-form">
+          <div class="field">
+            <label for="s-shipping">Frais de livraison fixes (€)</label>
+            <input type="number" id="s-shipping" step="0.01" min="0" required>
+          </div>
+          <div class="field">
+            <label class="check-line">
+              <input type="checkbox" id="s-free-enabled"> Livraison offerte à partir d'un montant
+            </label>
+            <input type="number" id="s-free-threshold" step="0.01" min="0" placeholder="Ex. 50" style="margin-top:8px;">
+          </div>
+
+          <h3 style="margin-top:28px;">Paiement</h3>
+          <div class="field">
+            <label class="check-line">
+              <input type="checkbox" id="s-payments-enabled"> Activer les paiements PayPal
+            </label>
+            <p class="hint">Décoché : la boutique reste en mode test, les clientes commandent sans paiement réel. Nécessite aussi que les identifiants PayPal soient renseignés côté serveur.</p>
+          </div>
+
+          <h3 style="margin-top:28px;">Programme de fidélité</h3>
+          <div class="field">
+            <label for="s-loyalty-earn">Points gagnés par euro dépensé</label>
+            <input type="number" id="s-loyalty-earn" step="0.1" min="0" required>
+          </div>
+          <div class="field">
+            <label for="s-loyalty-value">Valeur d'un point à l'utilisation (centimes)</label>
+            <input type="number" id="s-loyalty-value" step="0.1" min="0" required>
+            <p class="hint">Ex. 1 point = 0,01&nbsp;€ → 100 points valent 1&nbsp;€ de réduction.</p>
+          </div>
+          <div class="field">
+            <label for="s-loyalty-min">Solde minimum requis pour utiliser des points</label>
+            <input type="number" id="s-loyalty-min" step="1" min="0" required>
+          </div>
+
+          <button type="submit" class="btn wine">Enregistrer</button>
+          <p class="error-text" id="settings-error"></p>
+          <p class="hint" id="settings-saved" style="color:var(--ok); display:none;">Réglages enregistrés.</p>
+        </form>
+      </div>
     </div>
   </section>
 </main>
@@ -164,3 +207,4 @@
 <script src="/js/admin.js"></script>
 </body>
 </html>
+
