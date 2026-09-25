@@ -158,3 +158,82 @@ body.admin { background: var(--paper); }
   font-size: 13px; color: #918A80; cursor: pointer; text-align: center; padding: 6px;
 }
 #p-images { display: none; }  
+
+/* ---------- Affichage Téléphone & Tablette ---------- */
+@media (max-width: 860px) {
+  /* En-tête et conteneur */
+  .admin-header .wrap {
+    height: auto;
+    padding: 12px 16px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  /* Onglets : défilement fluide au doigt horizontal sans casser la ligne */
+  .admin-tabs {
+    overflow-x: auto;
+    white-space: nowrap;
+    padding-bottom: 6px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .admin-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .admin-tab {
+    flex-shrink: 0;
+  }
+
+  /* Passage de la grille 2 colonnes en 1 seule colonne */
+  .admin-layout {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .panel {
+    padding: 18px 14px;
+  }
+
+  /* Les champs côte à côte passent l'un sous l'autre */
+  .field-row {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  /* Évite le zoom automatique sur iPhone lors de la saisie */
+  .field input,
+  .field textarea,
+  .field select {
+    font-size: 16px;
+  }
+
+  /* Tableau produit : défilement horizontal sans faire déborder la page */
+  .product-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+  }
+
+  /* Grille des statistiques (Dashboard) */
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  .stat-card {
+    padding: 14px;
+  }
+  .stat-value {
+    font-size: 24px;
+  }
+
+  /* Lignes de commandes */
+  .orders-list .order-row .top {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .status-pill {
+    margin-left: 0;
+  }
+}
