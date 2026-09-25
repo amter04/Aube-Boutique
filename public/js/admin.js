@@ -67,9 +67,11 @@
       el('#tab-dashboard').style.display = target === 'dashboard' ? 'block' : 'none';
       el('#tab-products').style.display = target === 'products' ? 'block' : 'none';
       el('#tab-orders').style.display = target === 'orders' ? 'block' : 'none';
+      el('#tab-customers').style.display = target === 'customers' ? 'block' : 'none';
       el('#tab-settings').style.display = target === 'settings' ? 'block' : 'none';
       if (target === 'orders') loadOrders();
       if (target === 'dashboard') loadStats();
+      if (target === 'customers') loadCustomers();
     });
   });
 
@@ -94,7 +96,7 @@
     `).join('');
   }
 
-  // ---------- Settings (frais de livraison) ----------
+  // ---------- Settings (frais de livraison, paiement, fidelite) ----------
   async function loadSettings() {
     const res = await fetch('/api/admin/settings');
     if (res.status === 401) return;
@@ -104,6 +106,11 @@
     el('#s-free-enabled').checked = hasThreshold;
     el('#s-free-threshold').value = hasThreshold ? (s.freeShippingThresholdCents / 100).toFixed(2) : '';
     el('#s-free-threshold').disabled = !hasThreshold;
+    el('#s-payments-enabled').checked = !!s.paymentsEnabled;
+    const loyalty = s.loyalty || {};
+    el('#s-loyalty-earn').value = loyalty.pointsPerEuro ?? 1;
+    el('#s-loyalty-value').value = loyalty.pointValueCents ?? 1;
+    el('#s-loyalty-min').value = loyalty.minRedeemPoints ?? 100;
   }
 
   el('#s-free-enabled').addEventListener('change', (e) => {
@@ -119,17 +126,45 @@
     const freeShippingThresholdCents = freeEnabled
       ? Math.round(parseFloat(el('#s-free-threshold').value || '0') * 100)
       : null;
+    const paymentsEnabled = el('#s-payments-enabled').checked;
+    const loyalty = {
+      pointsPerEuro: parseFloat(el('#s-loyalty-earn').value || '0'),
+      pointValueCents: parseFloat(el('#s-loyalty-value').value || '0'),
+      minRedeemPoints: parseInt(el('#s-loyalty-min').value || '0', 10)
+    };
 
     const res = await fetch('/api/admin/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ shippingFlatCents, freeShippingThresholdCents })
+      body: JSON.stringify({ shippingFlatCents, freeShippingThresholdCents, paymentsEnabled, loyalty })
     });
     const data = await res.json();
     if (!res.ok) { el('#settings-error').textContent = data.error || 'Erreur'; return; }
     el('#settings-saved').style.display = 'block';
     showToast('Réglages enregistrés');
   });
+
+  // ---------- Clients / fidelite ----------
+  async function loadCustomers() {
+    const res = await fetch('/api/admin/customers');
+    if (res.status === 401) return showLogin();
+    const customers = await res.json();
+    el('#customers-count').textContent = `${customers.length} client${customers.length > 1 ? 'e' : ''}${customers.length > 1 ? 's' : ''}`;
+    const tbody = el('#customer-rows');
+    if (customers.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" style="color:#918A80; padding:18px 10px;">Aucun compte client créé pour le moment.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = customers.map(c => `
+      <tr>
+        <td>${c.name}</td>
+        <td>${c.email}</td>
+        <td><strong>${c.points}</strong></td>
+        <td>${c.ordersCount}</td>
+        <td>${new Date(c.createdAt).toLocaleDateString('fr-FR')}</td>
+      </tr>
+    `).join('');
+  }
 
   // ---------- Category select ----------
   function refreshCategoryOptions(selected) {
@@ -430,7 +465,8 @@
         <div style="color:#77706A;">${o.payerName || 'Client'} ${o.payerEmail ? `· ${o.payerEmail}` : ''}</div>
         ${address ? `<div style="color:#918A80; font-size:13px;">${address}</div>` : ''}
         <div style="color:#918A80; font-size:13px;">${new Date(o.createdAt).toLocaleString('fr-FR')} · ${o.items.map(i => `${i.name}${i.size && i.size !== 'TU' ? ` (${i.size})` : ''} ×${i.qty}`).join(', ')}</div>
-        <div style="color:#918A80; font-size:12.5px; margin-top:4px;">Sous-total ${fmt(o.subtotal)} + livraison ${fmt(o.shipping)}</div>
+        <div style="color:#918A80; font-size:12.5px; margin-top:4px;">Sous-total ${fmt(o.subtotal)} + livraison ${fmt(o.shipping)}${o.discount > 0 ? ` − ${fmt(o.discount)} (fidélité)` : ''}</div>
+        ${(o.pointsEarned > 0 || o.pointsRedeemed > 0) ? `<div style="color:var(--wine); font-size:12.5px; margin-top:2px;">${o.pointsEarned > 0 ? `+${o.pointsEarned} points gagnés` : ''}${o.pointsEarned > 0 && o.pointsRedeemed > 0 ? ' · ' : ''}${o.pointsRedeemed > 0 ? `${o.pointsRedeemed} points utilisés` : ''}</div>` : ''}
       </div>
     `;
     }).join('');
