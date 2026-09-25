@@ -651,6 +651,7 @@ button { font-family: inherit; cursor: pointer; }
 
 .account-logout-btn { width: 100%; justify-content: center; margin-top: 22px; }
 
+
 /* ========================================================
    ADAPTATION MOBILE & RESPONSIVE (écrans <= 768px)
    ======================================================== */
