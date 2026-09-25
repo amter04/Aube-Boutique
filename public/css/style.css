@@ -788,3 +788,22 @@ img {
     -webkit-overflow-scrolling: touch;
   }
 }
+
+.modal-info .desc {
+  max-height: 120px;           /* Hauteur max du texte */
+  overflow-y: auto;            /* Défilement si ça dépasse */
+  padding-right: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #554d45;
+  scrollbar-width: thin;       /* Barre de scroll discrète sur Firefox */
+}
+
+/* Barre de défilement discrète sur Chrome/Safari */
+.modal-info .desc::-webkit-scrollbar {
+  width: 4px;
+}
+.modal-info .desc::-webkit-scrollbar-thumb {
+  background-color: #d1c7bc;
+  border-radius: 4px;
+}
