@@ -43,8 +43,19 @@
         `).join('')}
         <div class="confirm-row" style="margin-top:8px;"><span>Sous-total</span><span>${fmt(o.subtotal)}</span></div>
         <div class="confirm-row"><span>Livraison</span><span>${o.shipping > 0 ? fmt(o.shipping) : 'Offerte'}</span></div>
+        ${o.discount > 0 ? `<div class="confirm-row"><span>Remise fidélité (${o.pointsRedeemed} points)</span><span>− ${fmt(o.discount)}</span></div>` : ''}
         <div class="confirm-row confirm-total"><span>Total</span><strong>${fmt(o.total)}</strong></div>
       </div>
+
+      ${o.pointsEarned > 0 ? `
+        <div class="confirm-card confirm-loyalty">
+          <span class="confirm-loyalty-icon">★</span>
+          <div>
+            <strong>+${o.pointsEarned} points de fidélité gagnés</strong>
+            <p>Retrouve ton solde de points dans « Mon compte », sur la boutique.</p>
+          </div>
+        </div>
+      ` : ''}
 
       <a href="/" class="btn wine" style="margin-top:28px;">Continuer mes achats</a>
     `;
@@ -63,3 +74,4 @@
     }
   })();
 })();
+
