@@ -18,38 +18,69 @@
   }
 
   // ---------- Auth ----------
+  let role = null; // 'admin' (patron) ou 'employee'
+  let loginMode = 'admin';
+
+  function esc(str) {
+    return String(str == null ? '' : str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
   async function checkAuth() {
     const res = await fetch('/api/admin/check');
     const data = await res.json();
-    if (data.isAdmin) showAdmin(); else showLogin();
+    if (data.role) showAdmin(data.role); else showLogin();
   }
 
   function showLogin() {
+    role = null;
     el('#login-screen').style.display = 'flex';
     el('#admin-main').style.display = 'none';
     el('#logout-btn').style.display = 'none';
   }
 
-  function showAdmin() {
+  function showAdmin(userRole) {
+    role = userRole;
     el('#login-screen').style.display = 'none';
     el('#admin-main').style.display = 'block';
     el('#logout-btn').style.display = 'inline-flex';
-    loadStats();
-    loadProducts();
-    loadSettings();
+    // Les onglets réservés au patron sont cachés pour un employé
+    document.querySelectorAll('.admin-tab[data-role="admin"]').forEach(t => {
+      t.style.display = role === 'admin' ? '' : 'none';
+    });
+    if (role === 'admin') {
+      loadStats();
+      loadProducts();
+      loadSettings();
+      selectTab('dashboard');
+    } else {
+      selectTab('orders');
+    }
   }
+
+  function setLoginMode(mode) {
+    loginMode = mode;
+    el('#email-field').style.display = mode === 'staff' ? 'block' : 'none';
+    el('#email').required = mode === 'staff';
+    el('#password-label').textContent = mode === 'staff' ? 'Mot de passe' : 'Mot de passe administrateur';
+    el('#mode-admin').className = 'btn ' + (mode === 'admin' ? 'wine' : 'secondary');
+    el('#mode-staff').className = 'btn ' + (mode === 'staff' ? 'wine' : 'secondary');
+    el('#login-error').textContent = '';
+  }
+  el('#mode-admin').addEventListener('click', () => setLoginMode('admin'));
+  el('#mode-staff').addEventListener('click', () => setLoginMode('staff'));
 
   el('#login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const password = el('#password').value;
     el('#login-error').textContent = '';
-    const res = await fetch('/api/admin/login', {
+    const isStaff = loginMode === 'staff';
+    const res = await fetch(isStaff ? '/api/staff/login' : '/api/admin/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password })
+      body: JSON.stringify(isStaff ? { email: el('#email').value, password } : { password })
     });
     const data = await res.json();
-    if (res.ok) { showAdmin(); }
+    if (res.ok) { el('#password').value = ''; showAdmin(isStaff ? 'employee' : 'admin'); }
     else { el('#login-error').textContent = data.error || 'Erreur de connexion'; }
   });
 
@@ -59,20 +90,91 @@
   });
 
   // ---------- Tabs ----------
-  document.querySelectorAll('.admin-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      const target = tab.dataset.tab;
-      el('#tab-dashboard').style.display = target === 'dashboard' ? 'block' : 'none';
-      el('#tab-products').style.display = target === 'products' ? 'block' : 'none';
-      el('#tab-orders').style.display = target === 'orders' ? 'block' : 'none';
-      el('#tab-customers').style.display = target === 'customers' ? 'block' : 'none';
-      el('#tab-settings').style.display = target === 'settings' ? 'block' : 'none';
-      if (target === 'orders') loadOrders();
-      if (target === 'dashboard') loadStats();
-      if (target === 'customers') loadCustomers();
+  function selectTab(target) {
+    document.querySelectorAll('.admin-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === target));
+    ['dashboard', 'products', 'orders', 'team', 'settings'].forEach(name => {
+      el('#tab-' + name).style.display = name === target ? 'block' : 'none';
     });
+    if (target === 'orders') loadOrders();
+    if (target === 'dashboard') loadStats();
+    if (target === 'team') loadEmployees();
+  }
+
+  document.querySelectorAll('.admin-tab').forEach(tab => {
+    tab.addEventListener('click', () => selectTab(tab.dataset.tab));
+  });
+
+  // ---------- Équipe (comptes employés, réservé au patron) ----------
+  async function loadEmployees() {
+    const res = await fetch('/api/admin/employees');
+    if (res.status === 401) return showLogin();
+    const employees = await res.json();
+    const tbody = el('#employee-rows');
+    if (employees.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" style="color:#918A80; padding:18px 10px;">Aucun employé pour le moment.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = employees.map(emp => `
+      <tr data-id="${emp.id}" data-active="${emp.active}">
+        <td>${esc(emp.name)}</td>
+        <td>${esc(emp.email)}</td>
+        <td>${emp.active ? 'Actif' : 'Désactivé'}</td>
+        <td>
+          <div class="row-actions">
+            <button class="toggle-btn">${emp.active ? 'Désactiver' : 'Réactiver'}</button>
+            <button class="pwd-btn">Mot de passe</button>
+            <button class="danger del-btn">Supprimer</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+
+    tbody.querySelectorAll('tr').forEach(row => {
+      const id = row.dataset.id;
+      const active = row.dataset.active === 'true';
+      row.querySelector('.toggle-btn').addEventListener('click', async () => {
+        await fetch(`/api/admin/employees/${id}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ active: !active })
+        });
+        loadEmployees();
+      });
+      row.querySelector('.pwd-btn').addEventListener('click', async () => {
+        const password = window.prompt('Nouveau mot de passe (6 caractères minimum) :');
+        if (!password) return;
+        const r = await fetch(`/api/admin/employees/${id}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password })
+        });
+        const d = await r.json();
+        showToast(r.ok ? 'Mot de passe modifié' : (d.error || 'Erreur'));
+      });
+      row.querySelector('.del-btn').addEventListener('click', async () => {
+        if (!confirm('Supprimer ce compte employé définitivement ?')) return;
+        await fetch(`/api/admin/employees/${id}`, { method: 'DELETE' });
+        showToast('Compte supprimé');
+        loadEmployees();
+      });
+    });
+  }
+
+  el('#employee-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    el('#employee-error').textContent = '';
+    const res = await fetch('/api/admin/employees', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: el('#emp-name').value,
+        email: el('#emp-email').value,
+        password: el('#emp-password').value
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) { el('#employee-error').textContent = data.error || 'Erreur'; return; }
+    el('#employee-form').reset();
+    showToast('Compte employé créé');
+    loadEmployees();
   });
 
   // ---------- Dashboard ----------
