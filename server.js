@@ -650,6 +650,37 @@ app.get('/api/admin/orders', requireAdmin, async (req, res) => {
   const rows = [...data.orders].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   res.json(rows.map(toAdminOrder));
 });
+// Suivi de preparation / expedition (patron + employes). Chaque changement est trace (qui, quand).
+const FULFILLMENT_STATUSES = ['to_prepare', 'prepared', 'shipped'];
+
+app.patch('/api/admin/orders/:id/fulfillment', requireStaff, (req, res) => {
+  const data = store.load();
+  const order = data.orders.find(o => o.id === parseInt(req.params.id, 10));
+  if (!order) return res.status(404).json({ error: 'Commande introuvable' });
+  if (order.status !== 'paid') {
+    return res.status(400).json({ error: "Seules les commandes payees peuvent etre preparees" });
+  }
+
+  const { status, trackingNumber } = req.body || {};
+  if (status !== undefined && !FULFILLMENT_STATUSES.includes(status)) {
+    return res.status(400).json({ error: 'Statut invalide' });
+  }
+
+  let by = 'Patron';
+  if (req.session.role === 'employee') {
+    const emp = (data.employees || []).find(e => e.id === req.session.employeeId);
+    by = emp ? emp.name : 'Employe';
+  }
+
+  if (trackingNumber !== undefined) order.trackingNumber = String(trackingNumber).trim().slice(0, 60);
+  if (status !== undefined && status !== (order.fulfillmentStatus || 'to_prepare')) {
+    order.fulfillmentStatus = status;
+    if (!order.fulfillmentHistory) order.fulfillmentHistory = [];
+    order.fulfillmentHistory.push({ status, by, at: new Date().toISOString() });
+  }
+  store.save(data);
+  res.json(toAdminOrder(order));
+});
 
 app.get('/api/admin/orders/export.csv', requireAdmin, async (req, res) => {
   const data = await store.load();
