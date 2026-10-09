@@ -84,9 +84,20 @@ async function saveProcessedImage(fileBuffer, originalName) {
   return `/uploads/${filename}`;
 }
 
+// Le patron a le role "admin" (acces complet). Un employe a le role "employee" (acces restreint).
 function requireAdmin(req, res, next) {
-  if (req.session && req.session.isAdmin) return next();
+  if (req.session && req.session.role === 'admin') return next();
   return res.status(401).json({ error: 'Non autorise' });
+}
+
+// Autorise aussi bien le patron que les employes (routes partagees : commandes, stock...)
+function requireStaff(req, res, next) {
+  if (req.session && (req.session.role === 'admin' || req.session.role === 'employee')) return next();
+  return res.status(401).json({ error: 'Non autorise' });
+}
+
+function toPublicEmployee(e) {
+  return { id: e.id, name: e.name, email: e.email, active: e.active !== false, createdAt: e.createdAt };
 }
 
 function requireCustomer(req, res, next) {
@@ -313,14 +324,15 @@ app.get('/api/products/:id', async (req, res) => {
   res.json(toPublicProduct(row));
 });
 
-// ---------- Admin auth ----------
+// ---------- Connexion patron (acces complet) ----------
 app.post('/api/admin/login', (req, res) => {
   const { password } = req.body || {};
   if (!process.env.ADMIN_PASSWORD) {
     return res.status(500).json({ error: "ADMIN_PASSWORD n'est pas configure sur le serveur" });
   }
   if (password === process.env.ADMIN_PASSWORD) {
-    req.session.isAdmin = true;
+    req.session.role = 'admin';
+    delete req.session.employeeId;
     return res.json({ ok: true });
   }
   return res.status(401).json({ error: 'Mot de passe incorrect' });
@@ -331,7 +343,85 @@ app.post('/api/admin/logout', (req, res) => {
 });
 
 app.get('/api/admin/check', (req, res) => {
-  res.json({ isAdmin: !!(req.session && req.session.isAdmin) });
+  if (req.session && req.session.role === 'admin') {
+    return res.json({ isAdmin: true, role: 'admin' });
+  }
+  if (req.session && req.session.role === 'employee') {
+    const data = store.load();
+    const employee = (data.employees || []).find(e => e.id === req.session.employeeId);
+    if (employee && employee.active !== false) {
+      return res.json({ isAdmin: false, role: 'employee', name: employee.name });
+    }
+  }
+  res.json({ isAdmin: false, role: null });
+});
+
+// ---------- Connexion employe (acces restreint) ----------
+app.post('/api/staff/login', (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || !password) return res.status(400).json({ error: 'Email et mot de passe requis' });
+  const data = store.load();
+  const employee = (data.employees || []).find(e => e.email.toLowerCase() === String(email).trim().toLowerCase());
+  if (!employee || employee.active === false || !store.verifyPassword(password, employee.passwordHash)) {
+    return res.status(401).json({ error: 'Identifiants incorrects' });
+  }
+  req.session.role = 'employee';
+  req.session.employeeId = employee.id;
+  res.json({ ok: true, employee: toPublicEmployee(employee) });
+});
+
+app.post('/api/staff/logout', (req, res) => {
+  req.session.destroy(() => res.json({ ok: true }));
+});
+
+// ---------- Gestion des comptes employes (reservee au patron) ----------
+app.get('/api/admin/employees', requireAdmin, (req, res) => {
+  const data = store.load();
+  res.json((data.employees || []).map(toPublicEmployee));
+});
+
+app.post('/api/admin/employees', requireAdmin, (req, res) => {
+  const { name, email, password } = req.body || {};
+  if (!name || !email || !password) return res.status(400).json({ error: 'Nom, email et mot de passe requis' });
+  if (String(password).length < 6) return res.status(400).json({ error: 'Le mot de passe doit faire au moins 6 caracteres' });
+  const data = store.load();
+  if (!data.employees) data.employees = [];
+  const normalizedEmail = String(email).trim().toLowerCase();
+  if (data.employees.some(e => e.email.toLowerCase() === normalizedEmail)) {
+    return res.status(400).json({ error: 'Un compte employe existe deja avec cet email' });
+  }
+  const employee = {
+    id: data.nextEmployeeId++,
+    name: String(name).trim(),
+    email: String(email).trim(),
+    passwordHash: store.hashPassword(password),
+    active: true,
+    createdAt: new Date().toISOString()
+  };
+  data.employees.push(employee);
+  store.save(data);
+  res.status(201).json(toPublicEmployee(employee));
+});
+
+// Desactive (ou reactive) un compte employe sans le supprimer, ou change son mot de passe
+app.put('/api/admin/employees/:id', requireAdmin, (req, res) => {
+  const data = store.load();
+  const employee = (data.employees || []).find(e => e.id === parseInt(req.params.id, 10));
+  if (!employee) return res.status(404).json({ error: 'Employe introuvable' });
+  if (req.body.active !== undefined) employee.active = !!req.body.active;
+  if (req.body.password) {
+    if (String(req.body.password).length < 6) return res.status(400).json({ error: 'Le mot de passe doit faire au moins 6 caracteres' });
+    employee.passwordHash = store.hashPassword(req.body.password);
+  }
+  store.save(data);
+  res.json(toPublicEmployee(employee));
+});
+
+app.delete('/api/admin/employees/:id', requireAdmin, (req, res) => {
+  const data = store.load();
+  data.employees = (data.employees || []).filter(e => e.id !== parseInt(req.params.id, 10));
+  store.save(data);
+  res.json({ ok: true });
 });
 
 // ---------- Comptes clients : inscription / connexion / profil ----------
@@ -394,7 +484,7 @@ app.get('/api/account/orders', requireCustomer, async (req, res) => {
   res.json(rows.map(toAdminOrder));
 });
 
-// ---------- Admin: dashboard ----------
+// ---------- Admin: stats ----------
 app.get('/api/admin/stats', requireAdmin, async (req, res) => {
   const data = await store.load();
   const paidOrders = data.orders.filter(o => o.status === 'paid');
@@ -466,7 +556,7 @@ app.get('/api/admin/customers', requireAdmin, async (req, res) => {
 });
 
 // ---------- Admin: products management ----------
-app.get('/api/admin/products', requireAdmin, async (req, res) => {
+app.get('/api/admin/products', requireStaff, async (req, res) => {
   const data = await store.load();
   const rows = [...data.products].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   res.json(rows.map(p => ({
@@ -560,7 +650,7 @@ app.put('/api/admin/products/:id', requireAdmin, upload.array('images', MAX_IMAG
       if (req.body.discountPercent !== undefined) {
         existing.discountPercent = Math.min(90, Math.max(0, parseInt(req.body.discountPercent, 10) || 0));
       }
-    if (req.body.flashEndsAt !== undefined) {
+      if (req.body.flashEndsAt !== undefined) {
         existing.flashEndsAt = req.body.flashEndsAt ? new Date(req.body.flashEndsAt).toISOString() : null;
       }
       if (isActive !== undefined) existing.isActive = (isActive === 'true' || isActive === true);
@@ -582,6 +672,25 @@ app.put('/api/admin/products/:id', requireAdmin, upload.array('images', MAX_IMAG
     console.error(err);
     res.status(err.status || 500).json({ error: err.message });
   }
+});
+
+// Reassort : l'employe peut modifier UNIQUEMENT les quantites en stock des tailles deja existantes.
+app.patch('/api/admin/products/:id/stock', requireStaff, (req, res) => {
+  const data = store.load();
+  const product = data.products.find(p => p.id === parseInt(req.params.id, 10));
+  if (!product) return res.status(404).json({ error: 'Produit introuvable' });
+  const updates = Array.isArray(req.body && req.body.sizes) ? req.body.sizes : null;
+  if (!updates) return res.status(400).json({ error: 'Liste de tailles requise' });
+  for (const u of updates) {
+    const entry = (product.sizes || []).find(s => s.size === u.size);
+    if (!entry) return res.status(400).json({ error: `Taille inconnue : ${u.size}` });
+    const stock = parseInt(u.stock, 10);
+    if (Number.isNaN(stock) || stock < 0) return res.status(400).json({ error: `Stock invalide pour ${u.size}` });
+    entry.stock = stock;
+  }
+  store.save(data);
+  broadcastUpdate();
+  res.json({ ok: true, sizes: product.sizes });
 });
 
 app.post('/api/admin/products/:id/duplicate', requireAdmin, async (req, res) => {
@@ -645,11 +754,12 @@ function toAdminOrder(o) {
   };
 }
 
-app.get('/api/admin/orders', requireAdmin, async (req, res) => {
+app.get('/api/admin/orders', requireStaff, async (req, res) => {
   const data = await store.load();
   const rows = [...data.orders].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   res.json(rows.map(toAdminOrder));
 });
+
 // Suivi de preparation / expedition (patron + employes). Chaque changement est trace (qui, quand).
 const FULFILLMENT_STATUSES = ['to_prepare', 'prepared', 'shipped'];
 
