@@ -40,11 +40,11 @@
 
 <main class="wrap" id="admin-main" style="display:none; padding-top:32px; padding-bottom:80px;">
   <div class="admin-tabs">
-    <button class="admin-tab active" data-tab="dashboard">Tableau de bord</button>
-    <button class="admin-tab" data-tab="products">Produits</button>
+    <button class="admin-tab active" data-tab="dashboard" data-role="admin">Tableau de bord</button>
+    <button class="admin-tab" data-tab="products" data-role="admin">Produits</button>
     <button class="admin-tab" data-tab="orders">Commandes</button>
-    <button class="admin-tab" data-tab="customers">Clients</button>
-    <button class="admin-tab" data-tab="settings">Réglages</button>
+    <button class="admin-tab" data-tab="team" data-role="admin">Équipe</button>
+    <button class="admin-tab" data-tab="settings" data-role="admin">Réglages</button>
   </div>
 
   <section id="tab-dashboard">
@@ -159,6 +159,36 @@
         <tbody id="customer-rows"></tbody>
       </table>
       <p class="hint" style="margin-top:14px;">Les points sont attribués et déduits automatiquement à chaque commande, selon le réglage de fidélité ci-dessous (onglet Réglages).</p>
+    </div>
+  </section>
+    <section id="tab-team" style="display:none;">
+    <div class="admin-layout">
+      <div class="panel">
+        <h3>Ajouter un employé</h3>
+        <form id="employee-form">
+          <div class="field">
+            <label for="emp-name">Prénom / nom</label>
+            <input type="text" id="emp-name" required>
+          </div>
+          <div class="field">
+            <label for="emp-email">Email (sert d'identifiant)</label>
+            <input type="email" id="emp-email" required>
+          </div>
+          <div class="field">
+            <label for="emp-password">Mot de passe (6 caractères minimum)</label>
+            <input type="text" id="emp-password" required minlength="6">
+          </div>
+          <button type="submit" class="btn wine">Créer le compte</button>
+          <p class="error-text" id="employee-error"></p>
+        </form>
+      </div>
+      <div class="panel">
+        <h3>Employés</h3>
+        <table class="product-table">
+          <thead><tr><th>Nom</th><th>Email</th><th>Statut</th><th></th></tr></thead>
+          <tbody id="employee-rows"></tbody>
+        </table>
+      </div>
     </div>
   </section>
 
