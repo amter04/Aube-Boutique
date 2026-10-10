@@ -342,32 +342,44 @@ app.post('/api/admin/logout', (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
 });
 
-app.get('/api/admin/check', (req, res) => {
-  if (req.session && req.session.role === 'admin') {
-    return res.json({ isAdmin: true, role: 'admin' });
-  }
-  if (req.session && req.session.role === 'employee') {
-    const data = store.load();
-    const employee = (data.employees || []).find(e => e.id === req.session.employeeId);
-    if (employee && employee.active !== false) {
-      return res.json({ isAdmin: false, role: 'employee', name: employee.name });
+app.get('/api/admin/check', async (req, res) => {
+  try {
+    if (req.session && req.session.role === 'admin') {
+      return res.json({ isAdmin: true, role: 'admin' });
     }
+    if (req.session && req.session.role === 'employee') {
+      const data = await store.load();
+      const employee = (data.employees || []).find(e => e.id === req.session.employeeId);
+      if (employee && employee.active !== false) {
+        return res.json({ isAdmin: false, role: 'employee', name: employee.name });
+      }
+    }
+    res.json({ isAdmin: false, role: null });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
-  res.json({ isAdmin: false, role: null });
 });
 
 // ---------- Connexion employe (acces restreint) ----------
-app.post('/api/staff/login', (req, res) => {
-  const { email, password } = req.body || {};
-  if (!email || !password) return res.status(400).json({ error: 'Email et mot de passe requis' });
-  const data = store.load();
-  const employee = (data.employees || []).find(e => e.email.toLowerCase() === String(email).trim().toLowerCase());
-  if (!employee || employee.active === false || !store.verifyPassword(password, employee.passwordHash)) {
-    return res.status(401).json({ error: 'Identifiants incorrects' });
+app.post('/api/staff/login', async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: 'Email et mot de passe requis' });
+
+    const data = await store.load();
+    const normalized = store.normalizeEmail(email);
+    const employee = (data.employees || []).find(e => store.normalizeEmail(e.email) === normalized);
+    if (!employee || employee.active === false || !store.verifyPassword(password, employee.passwordHash)) {
+      return res.status(401).json({ error: 'Identifiants incorrects' });
+    }
+    req.session.role = 'employee';
+    req.session.employeeId = employee.id;
+    res.json({ ok: true, employee: toPublicEmployee(employee) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
-  req.session.role = 'employee';
-  req.session.employeeId = employee.id;
-  res.json({ ok: true, employee: toPublicEmployee(employee) });
 });
 
 app.post('/api/staff/logout', (req, res) => {
@@ -375,53 +387,80 @@ app.post('/api/staff/logout', (req, res) => {
 });
 
 // ---------- Gestion des comptes employes (reservee au patron) ----------
-app.get('/api/admin/employees', requireAdmin, (req, res) => {
-  const data = store.load();
-  res.json((data.employees || []).map(toPublicEmployee));
+app.get('/api/admin/employees', requireAdmin, async (req, res) => {
+  try {
+    const data = await store.load();
+    res.json((data.employees || []).map(toPublicEmployee));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/api/admin/employees', requireAdmin, (req, res) => {
-  const { name, email, password } = req.body || {};
-  if (!name || !email || !password) return res.status(400).json({ error: 'Nom, email et mot de passe requis' });
-  if (String(password).length < 6) return res.status(400).json({ error: 'Le mot de passe doit faire au moins 6 caracteres' });
-  const data = store.load();
-  if (!data.employees) data.employees = [];
-  const normalizedEmail = String(email).trim().toLowerCase();
-  if (data.employees.some(e => e.email.toLowerCase() === normalizedEmail)) {
-    return res.status(400).json({ error: 'Un compte employe existe deja avec cet email' });
+app.post('/api/admin/employees', requireAdmin, async (req, res) => {
+  try {
+    const { name, email, password } = req.body || {};
+    if (!name || !email || !password) return res.status(400).json({ error: 'Nom, email et mot de passe requis' });
+    if (String(password).length < 6) return res.status(400).json({ error: 'Le mot de passe doit faire au moins 6 caracteres' });
+
+    const result = await store.withTransaction(async (data) => {
+      const normalized = store.normalizeEmail(email);
+      if (data.employees.some(e => store.normalizeEmail(e.email) === normalized)) {
+        return { error: 'Un compte employe existe deja avec cet email' };
+      }
+      const employee = {
+        id: data.nextEmployeeId++,
+        name: String(name).trim(),
+        email: String(email).trim(),
+        passwordHash: store.hashPassword(password),
+        active: true,
+        createdAt: new Date().toISOString()
+      };
+      data.employees.push(employee);
+      return { employee };
+    });
+    if (result.error) return res.status(400).json({ error: result.error });
+    res.status(201).json(toPublicEmployee(result.employee));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
-  const employee = {
-    id: data.nextEmployeeId++,
-    name: String(name).trim(),
-    email: String(email).trim(),
-    passwordHash: store.hashPassword(password),
-    active: true,
-    createdAt: new Date().toISOString()
-  };
-  data.employees.push(employee);
-  store.save(data);
-  res.status(201).json(toPublicEmployee(employee));
 });
 
 // Desactive (ou reactive) un compte employe sans le supprimer, ou change son mot de passe
-app.put('/api/admin/employees/:id', requireAdmin, (req, res) => {
-  const data = store.load();
-  const employee = (data.employees || []).find(e => e.id === parseInt(req.params.id, 10));
-  if (!employee) return res.status(404).json({ error: 'Employe introuvable' });
-  if (req.body.active !== undefined) employee.active = !!req.body.active;
-  if (req.body.password) {
-    if (String(req.body.password).length < 6) return res.status(400).json({ error: 'Le mot de passe doit faire au moins 6 caracteres' });
-    employee.passwordHash = store.hashPassword(req.body.password);
+app.put('/api/admin/employees/:id', requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { active, password } = req.body || {};
+    if (password && String(password).length < 6) {
+      return res.status(400).json({ error: 'Le mot de passe doit faire au moins 6 caracteres' });
+    }
+    const result = await store.withTransaction(async (data) => {
+      const employee = data.employees.find(e => e.id === id);
+      if (!employee) return { error: 'Employe introuvable', status: 404 };
+      if (active !== undefined) employee.active = !!active;
+      if (password) employee.passwordHash = store.hashPassword(password);
+      return { employee };
+    });
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    res.json(toPublicEmployee(result.employee));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
-  store.save(data);
-  res.json(toPublicEmployee(employee));
 });
 
-app.delete('/api/admin/employees/:id', requireAdmin, (req, res) => {
-  const data = store.load();
-  data.employees = (data.employees || []).filter(e => e.id !== parseInt(req.params.id, 10));
-  store.save(data);
-  res.json({ ok: true });
+app.delete('/api/admin/employees/:id', requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    await store.withTransaction(async (data) => {
+      data.employees = data.employees.filter(e => e.id !== id);
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ---------- Comptes clients : inscription / connexion / profil ----------
@@ -632,7 +671,7 @@ app.put('/api/admin/products/:id', requireAdmin, upload.array('images', MAX_IMAG
       newImages.push(await saveProcessedImage(file.buffer, file.originalname));
     }
 
-    const result = await store.withTransaction(async (data) => {
+    await store.withTransaction(async (data) => {
       const existing = data.products.find(p => p.id === productId);
       if (!existing) {
         const err = new Error('Produit introuvable');
@@ -675,22 +714,31 @@ app.put('/api/admin/products/:id', requireAdmin, upload.array('images', MAX_IMAG
 });
 
 // Reassort : l'employe peut modifier UNIQUEMENT les quantites en stock des tailles deja existantes.
-app.patch('/api/admin/products/:id/stock', requireStaff, (req, res) => {
-  const data = store.load();
-  const product = data.products.find(p => p.id === parseInt(req.params.id, 10));
-  if (!product) return res.status(404).json({ error: 'Produit introuvable' });
-  const updates = Array.isArray(req.body && req.body.sizes) ? req.body.sizes : null;
-  if (!updates) return res.status(400).json({ error: 'Liste de tailles requise' });
-  for (const u of updates) {
-    const entry = (product.sizes || []).find(s => s.size === u.size);
-    if (!entry) return res.status(400).json({ error: `Taille inconnue : ${u.size}` });
-    const stock = parseInt(u.stock, 10);
-    if (Number.isNaN(stock) || stock < 0) return res.status(400).json({ error: `Stock invalide pour ${u.size}` });
-    entry.stock = stock;
+app.patch('/api/admin/products/:id/stock', requireStaff, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const updates = Array.isArray(req.body && req.body.sizes) ? req.body.sizes : null;
+    if (!updates) return res.status(400).json({ error: 'Liste de tailles requise' });
+
+    const result = await store.withTransaction(async (data) => {
+      const product = data.products.find(p => p.id === id);
+      if (!product) return { error: 'Produit introuvable', status: 404 };
+      for (const u of updates) {
+        const entry = (product.sizes || []).find(s => s.size === u.size);
+        if (!entry) return { error: `Taille inconnue : ${u.size}`, status: 400 };
+        const stock = parseInt(u.stock, 10);
+        if (Number.isNaN(stock) || stock < 0) return { error: `Stock invalide pour ${u.size}`, status: 400 };
+        entry.stock = stock;
+      }
+      return { sizes: product.sizes };
+    });
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    broadcastUpdate();
+    res.json({ ok: true, sizes: result.sizes });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
-  store.save(data);
-  broadcastUpdate();
-  res.json({ ok: true, sizes: product.sizes });
 });
 
 app.post('/api/admin/products/:id/duplicate', requireAdmin, async (req, res) => {
@@ -763,33 +811,39 @@ app.get('/api/admin/orders', requireStaff, async (req, res) => {
 // Suivi de preparation / expedition (patron + employes). Chaque changement est trace (qui, quand).
 const FULFILLMENT_STATUSES = ['to_prepare', 'prepared', 'shipped'];
 
-app.patch('/api/admin/orders/:id/fulfillment', requireStaff, (req, res) => {
-  const data = store.load();
-  const order = data.orders.find(o => o.id === parseInt(req.params.id, 10));
-  if (!order) return res.status(404).json({ error: 'Commande introuvable' });
-  if (order.status !== 'paid') {
-    return res.status(400).json({ error: "Seules les commandes payees peuvent etre preparees" });
-  }
+app.patch('/api/admin/orders/:id/fulfillment', requireStaff, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { status, trackingNumber } = req.body || {};
+    if (status !== undefined && !FULFILLMENT_STATUSES.includes(status)) {
+      return res.status(400).json({ error: 'Statut invalide' });
+    }
 
-  const { status, trackingNumber } = req.body || {};
-  if (status !== undefined && !FULFILLMENT_STATUSES.includes(status)) {
-    return res.status(400).json({ error: 'Statut invalide' });
-  }
+    const result = await store.withTransaction(async (data) => {
+      const order = data.orders.find(o => o.id === id);
+      if (!order) return { error: 'Commande introuvable', status: 404 };
+      if (order.status !== 'paid') return { error: 'Seules les commandes payees peuvent etre preparees', status: 400 };
 
-  let by = 'Patron';
-  if (req.session.role === 'employee') {
-    const emp = (data.employees || []).find(e => e.id === req.session.employeeId);
-    by = emp ? emp.name : 'Employe';
-  }
+      let by = 'Patron';
+      if (req.session.role === 'employee') {
+        const emp = data.employees.find(e => e.id === req.session.employeeId);
+        by = emp ? emp.name : 'Employe';
+      }
 
-  if (trackingNumber !== undefined) order.trackingNumber = String(trackingNumber).trim().slice(0, 60);
-  if (status !== undefined && status !== (order.fulfillmentStatus || 'to_prepare')) {
-    order.fulfillmentStatus = status;
-    if (!order.fulfillmentHistory) order.fulfillmentHistory = [];
-    order.fulfillmentHistory.push({ status, by, at: new Date().toISOString() });
+      if (trackingNumber !== undefined) order.trackingNumber = String(trackingNumber).trim().slice(0, 60);
+      if (status !== undefined && status !== (order.fulfillmentStatus || 'to_prepare')) {
+        order.fulfillmentStatus = status;
+        if (!order.fulfillmentHistory) order.fulfillmentHistory = [];
+        order.fulfillmentHistory.push({ status, by, at: new Date().toISOString() });
+      }
+      return { order };
+    });
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    res.json(toAdminOrder(result.order));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
-  store.save(data);
-  res.json(toAdminOrder(order));
 });
 
 app.get('/api/admin/orders/export.csv', requireAdmin, async (req, res) => {
