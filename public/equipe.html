@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Aube — Espace équipe</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="/css/equipe.css">
+</head>
+<body class="eq">
+
+<header class="eq-header">
+  <div class="eq-wrap eq-header-inner">
+    <span>
+      <a class="logo" href="/equipe.html">Aube</a>
+      <span class="eq-tag">Espace équipe</span>
+    </span>
+    <div class="eq-user" id="eq-user" style="display:none;">
+      <span class="eq-username" id="eq-username"></span>
+      <button type="button" class="btn secondary eq-sm" id="eq-refresh">Actualiser</button>
+      <button type="button" class="btn secondary eq-sm" id="eq-logout">Se déconnecter</button>
+    </div>
+  </div>
+</header>
+
+<!-- Connexion -->
+<section class="eq-login" id="eq-login">
+  <div class="eq-login-card">
+    <h2>Connexion équipe</h2>
+    <form id="eq-login-form">
+      <div class="field">
+        <label for="eq-email">Email</label>
+        <input type="email" id="eq-email" required autocomplete="username">
+      </div>
+      <div class="field">
+        <label for="eq-password">Mot de passe</label>
+        <input type="password" id="eq-password" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn wine" style="width:100%; justify-content:center;">Se connecter</button>
+      <p class="error-text" id="eq-login-error"></p>
+    </form>
+    <p class="hint">Tes identifiants te sont donnés par le patron. <a href="/admin">Accès patron</a></p>
+  </div>
+</section>
+
+<main class="eq-wrap eq-main" id="eq-main" style="display:none;">
+  <nav class="eq-tabs">
+    <button type="button" class="eq-tab active" data-tab="overview">Aperçu</button>
+    <button type="button" class="eq-tab" data-tab="orders">Commandes <span class="eq-count" id="tab-count-orders"></span></button>
+    <button type="button" class="eq-tab" data-tab="stock">Stock <span class="eq-count warn" id="tab-count-stock"></span></button>
+  </nav>
+
+  <!-- APERÇU -->
+  <section id="tab-overview">
+    <div class="eq-stats" id="eq-stats"></div>
+    <h3 class="eq-h3">Les plus anciennes commandes à préparer</h3>
+    <div id="eq-urgent"></div>
+  </section>
+
+  <!-- COMMANDES -->
+  <section id="tab-orders" style="display:none;">
+    <div class="eq-toolbar">
+      <div class="eq-pills" id="order-pills"></div>
+      <input type="search" id="order-search" class="eq-search" placeholder="N° de commande, nom, ville…">
+    </div>
+    <div class="eq-actions-row">
+      <button type="button" class="btn secondary eq-sm" id="print-picklist">🖨 Liste de préparation (toutes à préparer)</button>
+      <button type="button" class="btn secondary eq-sm" id="print-all-slips">🖨 Tous les bordereaux (à préparer)</button>
+    </div>
+    <div id="orders-list"></div>
+  </section>
+
+  <!-- STOCK -->
+  <section id="tab-stock" style="display:none;">
+    <div class="eq-toolbar">
+      <div class="eq-pills" id="stock-pills"></div>
+      <input type="search" id="stock-search" class="eq-search" placeholder="Rechercher une pièce…">
+    </div>
+    <p class="hint eq-hint">Modifie les quantités avec − / + (ou tape le nombre réel), puis clique « Enregistrer » sur la pièce. Pour ajouter une taille qui n'existe pas encore, demande au patron.</p>
+    <div id="stock-list"></div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script src="/js/equipe.js"></script>
+</body>
+</html>
