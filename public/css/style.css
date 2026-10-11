@@ -1012,3 +1012,35 @@ img {
   .tile-label { font-size: 16px; padding: 28px 12px 10px; }
   .suggest-row { grid-template-columns: repeat(3, 1fr); }
 }
+
+
+/* ---------- Panier : tout le tiroir défile (corrige les articles écrasés) ---------- */
+#cart-drawer {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+#cart-drawer .drawer-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--paper);
+}
+#cart-drawer .cart-progress {
+  flex-shrink: 0;
+}
+#cart-drawer .drawer-body {
+  flex: 0 0 auto;      /* la liste garde sa taille naturelle au lieu d'être écrasée */
+  overflow: visible;
+  min-height: 120px;
+}
+#cart-drawer .drawer-foot {
+  flex: 0 0 auto;
+}
+
+/* Un peu d'air dans le formulaire de commande */
+#checkout-guest-fields .hint {
+  margin: 8px 0 18px;
+}
+#test-checkout-form .test-mode-note {
+  margin-bottom: 18px;
+}
