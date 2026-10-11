@@ -13,11 +13,79 @@
     modalSelectedSize: null,
     modalImageIndex: 0,
     customer: null, // compte client connecte (ou null si invitee)
-    redeemPoints: false // case "utiliser mes points" cochee au checkout
+    redeemPoints: false, // case "utiliser mes points" cochee au checkout
+    promo: null // { code, discountCents, label } si un code promo est applique
   };
 
   const BADGE_LABELS = { promo: 'Promo', flash: 'Vente flash', tendance: 'Tendance' };
   const LOW_STOCK_THRESHOLD = 3;
+  const NEW_PRODUCT_DAYS = 14; // une piece est "Nouveau" pendant 14 jours
+
+  // ---------- Textes de la boutique : A ADAPTER ----------
+  // Ces valeurs par defaut s'affichent dans le bandeau, les pastilles de reassurance et les fiches produit.
+  // Modifie-les ici pour qu'elles correspondent a ta vraie politique (delai de preparation, retours...).
+  // Plus tard, le serveur pourra les fournir via config.shopTexts, sans toucher au code.
+  const DEFAULT_TEXTS = {
+    handling: 'Commandes préparées sous 48 h ouvrées',
+    returns: '14 jours pour changer d\'avis',
+    payment: 'Paiement sécurisé'
+  };
+  function texts() { return { ...DEFAULT_TEXTS, ...(state.config.shopTexts || {}) }; }
+
+  // Pages d'information du pied de page. Livraison, retours et fidelite se remplissent toutes seules
+  // a partir des reglages. Les 4 pages legales (CGV, mentions, confidentialite, contact) sont
+  // a COMPLETER avec les vraies informations de la boutique, et a faire relire avant la mise en ligne.
+  function infoPage(key) {
+    const L = state.config.loyalty || {};
+    const flat = (state.config.shippingFlatCents || 0) / 100;
+    const th = state.config.freeShippingThresholdCents;
+    const t = texts();
+    switch (key) {
+      case 'livraison':
+        return {
+          title: 'Livraison',
+          html: `
+            <p>${flat > 0 ? `Les frais de livraison sont de <strong>${fmt(flat)}</strong>.` : 'La livraison est <strong>offerte</strong>.'}
+            ${flat > 0 && th != null ? `Elle est <strong>offerte dès ${fmt(th / 100)}</strong> d'achat.` : ''}</p>
+            <p>${t.handling}.</p>
+            <p class="todo">À compléter : transporteurs, délais de livraison, pays desservis, suivi de colis.</p>`
+        };
+      case 'retours':
+        return {
+          title: 'Retours & échanges',
+          html: `
+            <p>${t.returns}. Tu peux nous retourner ta commande à compter de sa réception, conformément au droit de rétractation.</p>
+            <p class="todo">À compléter : conditions de retour (état des articles, emballage), frais de retour, délai de remboursement, procédure d'échange.</p>`
+        };
+      case 'fidelite': {
+        const perEuro = L.pointsPerEuro || 0;
+        const worthOf100 = ((100 * (L.pointValueCents || 0)) / 100);
+        if (!perEuro) return { title: 'Programme fidélité', html: '<p>Le programme de fidélité arrive bientôt.</p>' };
+        return {
+          title: 'Programme fidélité',
+          html: `
+            <p>Crée un compte et cumule des points à chaque commande : <strong>${perEuro} point${perEuro > 1 ? 's' : ''} par euro dépensé</strong> (hors livraison).</p>
+            <p>100 points = <strong>${fmt(worthOf100)}</strong> de réduction${L.minRedeemPoints ? `, utilisables dès ${L.minRedeemPoints} points` : ''}.</p>
+            <p>Tes points apparaissent dans « Mon compte » et se retirent directement de ta commande au moment de payer.</p>`
+        };
+      }
+      case 'contact':
+        return {
+          title: 'Contact',
+          html: state.config.contactEmail
+            ? `<p>Une question sur une commande ou une pièce ? Écris-nous à <a href="mailto:${state.config.contactEmail}">${state.config.contactEmail}</a>.</p>`
+            : `<p class="todo">À compléter : adresse email de contact, réseaux sociaux, adresse de la boutique si elle existe.</p>`
+        };
+      case 'cgv':
+        return { title: 'Conditions générales de vente', html: `<p class="todo">À compléter avec les conditions générales de vente de la boutique (prix, commande, paiement, livraison, rétractation, garanties, litiges). Fais relire ce texte avant l'ouverture.</p>` };
+      case 'mentions':
+        return { title: 'Mentions légales', html: `<p class="todo">À compléter : nom ou raison sociale, forme juridique, adresse, numéro SIRET, email de contact, directeur de la publication, hébergeur du site. Obligatoire pour vendre en ligne en France.</p>` };
+      case 'confidentialite':
+        return { title: 'Politique de confidentialité', html: `<p class="todo">À compléter : données collectées (nom, email, adresse, commandes), finalité, durée de conservation, droits des clientes (accès, suppression), contact pour les exercer.</p>` };
+      default:
+        return { title: '', html: '' };
+    }
+  }
 
   const fmt = (n) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: state.config.currency || 'EUR' }).format(n);
   const el = (sel) => document.querySelector(sel);
@@ -46,6 +114,18 @@
     setTimeout(() => toastEl.classList.remove('show'), 2200);
   }
 
+  // Appel optionnel vers le serveur : renvoie null si la route n'existe pas encore (ou si la reponse n'est pas du JSON)
+  async function fetchJsonOptional(url) {
+    try {
+      const res = await fetch(url);
+      const type = res.headers.get('content-type') || '';
+      if (!res.ok || !type.includes('application/json')) return null;
+      return await res.json();
+    } catch (e) {
+      return null;
+    }
+  }
+
   // ---------- Load data ----------
   async function loadConfig() {
     const res = await fetch('/api/config');
@@ -57,11 +137,109 @@
       el('#checkout-note').textContent = '';
       el('#footer-payment-note').textContent = 'Boutique en mode test — aucun paiement réel n\'est demandé pour le moment.';
     }
+    applyConfigFlags();
+  }
+
+  // Les fonctions qui dependent du serveur ne s'affichent que si le serveur les annonce dans /api/config
+  function applyConfigFlags() {
+    el('#promo-box').style.display = state.config.promoEnabled ? 'block' : 'none';
+    el('#gift-box').style.display = state.config.giftNoteEnabled ? 'block' : 'none';
+    el('#newsletter-box').style.display = state.config.newsletterEnabled ? 'block' : 'none';
   }
 
   async function loadProducts() {
     const res = await fetch('/api/products');
     state.products = await res.json();
+  }
+
+  // ---------- Bandeau d'annonces ----------
+  let announceIndex = 0;
+  let announceTimer = null;
+
+  function freeShippingLabel() {
+    const flat = state.config.shippingFlatCents || 0;
+    const th = state.config.freeShippingThresholdCents;
+    if (flat === 0) return 'Livraison offerte';
+    if (th != null) return `Livraison offerte dès ${fmt(th / 100)} d'achat`;
+    return null;
+  }
+
+  function buildAnnouncements() {
+    const msgs = [];
+    const custom = state.config.announcement;
+    if (Array.isArray(custom)) msgs.push(...custom.filter(Boolean));
+    else if (custom) msgs.push(custom);
+    const ship = freeShippingLabel();
+    if (ship) msgs.push(ship);
+    const L = state.config.loyalty || {};
+    if (L.pointsPerEuro > 0) msgs.push(`Programme fidélité : ${L.pointsPerEuro} point${L.pointsPerEuro > 1 ? 's' : ''} par euro dépensé`);
+    msgs.push(texts().handling);
+    return msgs;
+  }
+
+  function renderAnnounce() {
+    const msgs = buildAnnouncements();
+    const bar = el('#announce-bar');
+    const textEl = el('#announce-text');
+    clearInterval(announceTimer);
+    if (!msgs.length) { bar.style.display = 'none'; return; }
+    bar.style.display = '';
+    announceIndex = 0;
+    textEl.textContent = msgs[0];
+    if (msgs.length > 1) {
+      announceTimer = setInterval(() => {
+        textEl.classList.add('fade');
+        setTimeout(() => {
+          announceIndex = (announceIndex + 1) % msgs.length;
+          textEl.textContent = msgs[announceIndex];
+          textEl.classList.remove('fade');
+        }, 300);
+      }, 4500);
+    }
+  }
+
+  // ---------- Pastilles de reassurance ----------
+  function renderReassurance() {
+    const t = texts();
+    const ship = freeShippingLabel();
+    const items = [
+      { icon: '🚚', title: ship || 'Livraison', text: ship ? 'En France' : '' },
+      { icon: '📦', title: 'Expédition rapide', text: t.handling },
+      { icon: '↩️', title: 'Retours & échanges', text: t.returns },
+      { icon: '🔒', title: t.payment, text: 'Carte bancaire ou PayPal' }
+    ];
+    el('#reassurance-grid').innerHTML = items.map(i => `
+      <div class="reassure-item">
+        <span class="reassure-icon">${i.icon}</span>
+        <div><div class="reassure-title">${i.title}</div>${i.text ? `<div class="reassure-text">${i.text}</div>` : ''}</div>
+      </div>
+    `).join('');
+  }
+
+  // ---------- Teaser de la prochaine collection ----------
+  let dropTimer = null;
+  function renderNextDrop() {
+    const nd = state.config.nextDrop;
+    const section = el('#next-drop');
+    clearInterval(dropTimer);
+    if (!nd || !nd.date || new Date(nd.date).getTime() <= Date.now()) { section.style.display = 'none'; return; }
+    section.style.display = '';
+    el('#next-drop-title').textContent = nd.title || 'Nouvelle collection';
+    el('#next-drop-text').textContent = nd.text || '';
+    tickNextDrop();
+    dropTimer = setInterval(tickNextDrop, 1000);
+  }
+
+  function tickNextDrop() {
+    const nd = state.config.nextDrop;
+    if (!nd || !nd.date) return;
+    const diff = new Date(nd.date).getTime() - Date.now();
+    if (diff <= 0) { el('#next-drop').style.display = 'none'; clearInterval(dropTimer); return; }
+    const s = Math.floor(diff / 1000);
+    el('#cd-days').textContent = Math.floor(s / 86400);
+    el('#cd-hours').textContent = Math.floor((s % 86400) / 3600);
+    el('#cd-mins').textContent = Math.floor((s % 3600) / 60);
+    el('#cd-secs').textContent = s % 60;
   }
 
   // ---------- Comptes clients ----------
@@ -236,6 +414,9 @@
   el('#cf-create-account').addEventListener('change', (e) => {
     el('#checkout-create-password-field').style.display = e.target.checked ? 'block' : 'none';
   });
+  el('#cf-gift').addEventListener('change', (e) => {
+    el('#gift-note-field').style.display = e.target.checked ? 'block' : 'none';
+  });
 
   // ---------- Badges / promo helpers ----------
   function badgesHtml(p) {
@@ -248,6 +429,11 @@
       return `<div class="price-row"><span class="price-strike">${fmt(p.price)}</span><span class="price-now">${fmt(p.finalPrice)}</span></div>`;
     }
     return `<div class="card-price">${fmt(p.price)}</div>`;
+  }
+
+  function isNewProduct(p) {
+    if (!p.createdAt) return false;
+    return (Date.now() - new Date(p.createdAt).getTime()) < NEW_PRODUCT_DAYS * 86400000;
   }
 
   function flashCountdownText(flashEndsAt) {
@@ -264,20 +450,27 @@
   }
 
   // ---------- Render: category dropdown ----------
+  function categoriesList() {
+    return [...new Set(state.products.map(p => p.category).filter(Boolean))];
+  }
+
+  function selectCategory(cat, scroll) {
+    state.activeCategory = cat;
+    closeDropdown();
+    renderFilters();
+    renderCategoryDropdown();
+    renderGrid();
+    if (scroll) document.getElementById('collection').scrollIntoView({ behavior: 'smooth' });
+  }
+
   function renderCategoryDropdown() {
-    const cats = ['Tout', ...new Set(state.products.map(p => p.category).filter(Boolean))];
+    const cats = ['Tout', ...categoriesList()];
     const panel = el('#cat-dropdown-panel');
     panel.innerHTML = cats.map(c =>
       `<button data-cat="${c}" class="${c === state.activeCategory ? 'active' : ''}">${c}</button>`
     ).join('');
     panel.querySelectorAll('button').forEach(btn => {
-      btn.addEventListener('click', () => {
-        state.activeCategory = btn.dataset.cat;
-        closeDropdown();
-        renderFilters();
-        renderGrid();
-        document.getElementById('collection').scrollIntoView({ behavior: 'smooth' });
-      });
+      btn.addEventListener('click', () => selectCategory(btn.dataset.cat, true));
     });
   }
 
@@ -289,17 +482,33 @@
 
   // ---------- Render: filter chips ----------
   function renderFilters() {
-    const cats = ['Tout', ...new Set(state.products.map(p => p.category).filter(Boolean))];
+    const cats = ['Tout', ...categoriesList()];
     filtersEl.innerHTML = cats.map(c =>
       `<button class="filter-chip ${c === state.activeCategory ? 'active' : ''}" data-cat="${c}">${c}</button>`
     ).join('');
     filtersEl.querySelectorAll('.filter-chip').forEach(btn => {
-      btn.addEventListener('click', () => {
-        state.activeCategory = btn.dataset.cat;
-        renderFilters();
-        renderCategoryDropdown();
-        renderGrid();
-      });
+      btn.addEventListener('click', () => selectCategory(btn.dataset.cat, false));
+    });
+  }
+
+  // ---------- Render: "Explorez nos univers" (une tuile par categorie) ----------
+  function renderUniverses() {
+    const cats = categoriesList();
+    const section = el('#universes');
+    if (cats.length < 2) { section.style.display = 'none'; return; }
+    section.style.display = '';
+    el('#universes-grid').innerHTML = cats.map(c => {
+      const inCat = state.products.filter(p => p.category === c);
+      const cover = inCat.find(p => p.imageUrl);
+      return `
+        <button type="button" class="tile" data-cat="${c}">
+          ${cover ? `<img src="${cover.imageUrl}" alt="${c}" loading="lazy">` : '<div class="tile-ph"></div>'}
+          <span class="tile-label">${c}<small>${inCat.length} pièce${inCat.length > 1 ? 's' : ''}</small></span>
+        </button>
+      `;
+    }).join('');
+    el('#universes-grid').querySelectorAll('.tile').forEach(t => {
+      t.addEventListener('click', () => selectCategory(t.dataset.cat, true));
     });
   }
 
@@ -344,8 +553,7 @@
       showToast('Ajouté aux favoris');
     }
     saveWishlist();
-    renderGrid();
-    renderTrending();
+    renderAllGrids();
     if (state.modalProduct) updateWishlistHeart();
     if (el('#wishlist-drawer').classList.contains('open')) renderWishlistDrawer();
   }
@@ -392,33 +600,33 @@
   el('#close-wishlist').addEventListener('click', closeWishlist);
   wishlistOverlay.addEventListener('click', closeWishlist);
 
-  // ---------- Render: trending / promo section ----------
-  function renderTrending() {
-    const items = state.products.filter(p => p.badges && p.badges.length > 0);
-    const section = el('#trending');
-    if (items.length === 0) { section.style.display = 'none'; return; }
-    section.style.display = '';
-    el('#trending-count').textContent = `${items.length} pièce${items.length > 1 ? 's' : ''}`;
-    el('#trending-grid').innerHTML = items.map(p => cardHtml(p)).join('');
-    bindCardClicks(el('#trending-grid'));
+  // ---------- Render: product card ----------
+  function cardSizesHtml(p) {
+    if (!p.sizes || p.sizes.length === 0) return '';
+    if (p.sizes.length === 1 && p.sizes[0].size === 'TU') {
+      return `<div class="card-sizes"><span class="sz ${p.sizes[0].inStock ? '' : 'out'}">Taille unique</span></div>`;
+    }
+    return `<div class="card-sizes">${p.sizes.map(s => `<span class="sz ${s.inStock ? '' : 'out'}">${s.size}</span>`).join('')}</div>`;
   }
 
-  // ---------- Render: product card ----------
   function cardHtml(p) {
     const countdown = p.badges && p.badges.includes('flash') ? flashCountdownText(p.flashEndsAt) : '';
     const images = p.images && p.images.length ? p.images : (p.imageUrl ? [p.imageUrl] : []);
     return `
       <a href="/produit/${p.slug}" class="card" data-id="${p.id}">
         <div class="card-media">
-          ${images[0] ? `<img class="img-main" src="${images[0]}" alt="${p.name}">` : `<div class="placeholder">Aube</div>`}
-          ${images[1] ? `<img class="img-hover" src="${images[1]}" alt="${p.name}">` : ''}
-          ${!p.inStock ? '<span class="badge-out">Épuisé</span>' : ''}
+          ${images[0] ? `<img class="img-main" src="${images[0]}" alt="${p.name}" loading="lazy">` : `<div class="placeholder">Aube</div>`}
+          ${images[1] ? `<img class="img-hover" src="${images[1]}" alt="${p.name}" loading="lazy">` : ''}
+          ${!p.inStock ? '<span class="badge-out">Épuisé</span>' : (isNewProduct(p) ? '<span class="badge-new">Nouveau</span>' : '')}
+          ${p.preorderNote ? '<span class="badge-preorder">Pré-commande</span>' : ''}
+          ${p.discountPercent > 0 ? `<span class="badge-discount">-${p.discountPercent}%</span>` : ''}
           <button type="button" class="card-heart ${isWishlisted(p.id) ? 'active' : ''}" data-wish="${p.id}" aria-label="Ajouter aux favoris">${isWishlisted(p.id) ? '♥' : '♡'}</button>
         </div>
         ${badgesHtml(p)}
         ${p.category ? `<div class="card-cat">${p.category}</div>` : ''}
         <div class="card-name">${p.name}</div>
         ${priceHtml(p)}
+        ${cardSizesHtml(p)}
         ${p.inStock && p.stock <= LOW_STOCK_THRESHOLD ? `<div class="low-stock">Il reste ${p.stock} exemplaire${p.stock > 1 ? 's' : ''}</div>` : ''}
         ${countdown ? `<div class="flash-countdown">${countdown}</div>` : ''}
       </a>
@@ -442,7 +650,28 @@
     });
   }
 
-  // ---------- Render: grid ----------
+  // ---------- Render: trending / featured / grid ----------
+  function renderTrending() {
+    const items = state.products.filter(p => p.badges && p.badges.length > 0);
+    const section = el('#trending');
+    if (items.length === 0) { section.style.display = 'none'; return; }
+    section.style.display = '';
+    el('#trending-count').textContent = `${items.length} pièce${items.length > 1 ? 's' : ''}`;
+    el('#trending-grid').innerHTML = items.map(p => cardHtml(p)).join('');
+    bindCardClicks(el('#trending-grid'));
+  }
+
+  function renderFeatured() {
+    const items = state.products.filter(p => p.featured);
+    const section = el('#featured');
+    if (items.length === 0) { section.style.display = 'none'; return; }
+    section.style.display = '';
+    el('#featured-title').textContent = state.config.featuredTitle || 'Nos coups de cœur';
+    el('#featured-count').textContent = `${items.length} pièce${items.length > 1 ? 's' : ''}`;
+    el('#featured-grid').innerHTML = items.map(p => cardHtml(p)).join('');
+    bindCardClicks(el('#featured-grid'));
+  }
+
   function filteredItems() {
     let items = state.products.filter(p =>
       state.activeCategory === 'Tout' || p.category === state.activeCategory
@@ -475,6 +704,30 @@
     bindCardClicks(grid);
   }
 
+  function renderAllGrids() {
+    renderFeatured();
+    renderTrending();
+    renderGrid();
+  }
+
+  // ---------- Avis clientes ----------
+  async function loadReviews() {
+    const data = await fetchJsonOptional('/api/reviews');
+    const section = el('#reviews');
+    if (!Array.isArray(data) || data.length === 0) { section.style.display = 'none'; return; }
+    section.style.display = '';
+    el('#reviews-grid').innerHTML = data.slice(0, 6).map(r => {
+      const stars = r.rating ? '★'.repeat(Math.round(r.rating)) + '☆'.repeat(5 - Math.round(r.rating)) : '';
+      return `
+        <div class="review">
+          ${stars ? `<div class="review-stars">${stars}</div>` : ''}
+          <p class="review-text">« ${r.text} »</p>
+          <div class="review-author">${r.name || ''}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
   // ---------- Product modal ----------
   const modal = el('#product-modal');
 
@@ -491,11 +744,16 @@
     el('#modal-badges').innerHTML = badgesHtml(p);
     el('#modal-name').textContent = p.name;
     el('#modal-price').innerHTML = priceHtml(p);
+    const pre = el('#modal-preorder');
+    if (p.preorderNote) { pre.textContent = p.preorderNote; pre.style.display = 'block'; } else { pre.style.display = 'none'; }
     el('#modal-desc').textContent = p.description || '';
     updateWishlistHeart();
     renderSizePicker();
     updateModalAddButton();
+    renderPerks(p);
+    renderRelated(p);
     modal.classList.add('open');
+    modal.querySelector('.modal-card').scrollTop = 0;
 
     if (pushHistory) {
       const url = productUrl(p);
@@ -518,6 +776,40 @@
     btn.classList.toggle('active', active);
   }
   el('#modal-wishlist-btn').addEventListener('click', () => toggleWishlist(state.modalProduct.id));
+
+  // Petites lignes de confiance sous le bouton : livraison, retours, points fidelite
+  function renderPerks(p) {
+    const perks = [];
+    const ship = freeShippingLabel();
+    if (ship) perks.push(`🚚 ${ship}`);
+    perks.push(`↩️ ${texts().returns}`);
+    const L = state.config.loyalty || {};
+    if (L.pointsPerEuro > 0) {
+      const pts = Math.floor(p.finalPrice * L.pointsPerEuro);
+      if (pts > 0) perks.push(`♡ +${pts} points fidélité avec un compte`);
+    }
+    el('#modal-perks').innerHTML = perks.map(x => `<li>${x}</li>`).join('');
+  }
+
+  // "Vous aimerez aussi" : meme categorie d'abord, puis le reste
+  function renderRelated(p) {
+    const wrap = el('#modal-related-wrap');
+    const same = state.products.filter(x => x.id !== p.id && x.inStock && p.category && x.category === p.category);
+    const others = state.products.filter(x => x.id !== p.id && x.inStock && !same.includes(x));
+    const list = [...same, ...others].slice(0, 4);
+    if (list.length === 0) { wrap.style.display = 'none'; return; }
+    wrap.style.display = 'block';
+    el('#modal-related').innerHTML = list.map(x => `
+      <button type="button" class="related-item" data-id="${x.id}">
+        ${x.imageUrl ? `<img src="${x.imageUrl}" alt="${x.name}" loading="lazy">` : '<div class="tile-ph"></div>'}
+        <span class="related-name">${x.name}</span>
+        <span class="related-price">${fmt(x.finalPrice)}</span>
+      </button>
+    `).join('');
+    el('#modal-related').querySelectorAll('.related-item').forEach(b => {
+      b.addEventListener('click', () => openProductModal(parseInt(b.dataset.id, 10)));
+    });
+  }
 
   function renderModalGallery() {
     const p = state.modalProduct;
@@ -566,18 +858,32 @@
     const yPct = ((e.clientY - rect.top) / rect.height) * 100;
     lightboxImg.style.transformOrigin = `${xPct}% ${yPct}%`;
   });
-  lightbox.addEventListener('transitionend', () => {}, true);
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && lightbox.classList.contains('open')) lightbox.classList.remove('open');
-    if (e.key === 'Escape' && authModal.classList.contains('open')) closeAuthModal();
-    if (e.key === 'Escape' && accountDrawer.classList.contains('open')) closeAccountDrawer();
-  });
 
-  // ---------- Size guide ----------
+  // ---------- Size guide + pages d'information ----------
   const sizeGuideModal = el('#size-guide-modal');
   el('#size-guide-link').addEventListener('click', () => sizeGuideModal.classList.add('open'));
   el('#size-guide-close').addEventListener('click', () => sizeGuideModal.classList.remove('open'));
   sizeGuideModal.addEventListener('click', (e) => { if (e.target === sizeGuideModal) sizeGuideModal.classList.remove('open'); });
+
+  const infoModal = el('#info-modal');
+  function openInfo(key) {
+    const page = infoPage(key);
+    el('#info-title').textContent = page.title;
+    el('#info-body').innerHTML = page.html;
+    infoModal.classList.add('open');
+  }
+  el('#info-close').addEventListener('click', () => infoModal.classList.remove('open'));
+  infoModal.addEventListener('click', (e) => { if (e.target === infoModal) infoModal.classList.remove('open'); });
+  document.querySelectorAll('.footer-link').forEach(b => b.addEventListener('click', () => openInfo(b.dataset.info)));
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (lightbox.classList.contains('open')) lightbox.classList.remove('open');
+    if (authModal.classList.contains('open')) closeAuthModal();
+    if (accountDrawer.classList.contains('open')) closeAccountDrawer();
+    if (infoModal.classList.contains('open')) infoModal.classList.remove('open');
+    if (sizeGuideModal.classList.contains('open')) sizeGuideModal.classList.remove('open');
+  });
 
   // ---------- Share link ----------
   el('#modal-share').addEventListener('click', async () => {
@@ -597,9 +903,11 @@
       container.innerHTML = '';
       return;
     }
+    // Si les alertes de retour en stock sont actives, on laisse cliquer sur une taille epuisee pour s'inscrire
+    const alertsOn = !!state.config.stockAlertsEnabled;
     container.innerHTML = p.sizes.map(s => `
       <button type="button" class="size-opt ${s.size === state.modalSelectedSize ? 'selected' : ''} ${!s.inStock ? 'out' : ''}"
-        data-size="${s.size}" ${!s.inStock ? 'disabled' : ''}>${s.size}</button>
+        data-size="${s.size}" ${(!s.inStock && !alertsOn) ? 'disabled' : ''}>${s.size}</button>
     `).join('');
     container.querySelectorAll('.size-opt').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -614,32 +922,70 @@
     const p = state.modalProduct;
     const addBtn = el('#modal-add');
     const note = el('#modal-stock-note');
+    const alertBox = el('#modal-alert');
+    const alertsOn = !!state.config.stockAlertsEnabled;
     const hasSizes = p.sizes && p.sizes.length > 0;
     const selected = hasSizes ? p.sizes.find(s => s.size === state.modalSelectedSize) : null;
 
-    if (!p.inStock) {
+    alertBox.style.display = 'none';
+    el('#alert-msg').textContent = '';
+    note.textContent = '';
+    addBtn.onclick = null;
+
+    function showAlertBox() {
+      alertBox.style.display = 'block';
+      const emailInput = el('#alert-email');
+      if (!emailInput.value && state.customer) emailInput.value = state.customer.email;
+    }
+
+    if (!p.inStock && !alertsOn) {
       addBtn.disabled = true;
       addBtn.textContent = 'Épuisé';
-      note.textContent = '';
       return;
     }
-    if (hasSizes && !state.modalSelectedSize) {
+    if (hasSizes && !selected) {
       addBtn.disabled = true;
-      addBtn.textContent = 'Choisir une taille';
-      note.textContent = '';
+      addBtn.textContent = !p.inStock ? 'Choisir une taille pour être prévenue' : 'Choisir une taille';
+      return;
+    }
+    if (!hasSizes && !p.inStock) {
+      addBtn.disabled = true;
+      addBtn.textContent = 'Épuisé';
+      showAlertBox();
+      return;
+    }
+    if (hasSizes && selected && !selected.inStock) {
+      addBtn.disabled = true;
+      addBtn.textContent = 'Épuisé';
+      showAlertBox();
       return;
     }
     if (hasSizes && selected) {
-      addBtn.disabled = !selected.inStock;
       note.textContent = selected.stock > 0 && selected.stock <= LOW_STOCK_THRESHOLD
         ? `Il reste ${selected.stock} exemplaire${selected.stock > 1 ? 's' : ''} dans cette taille`
         : '';
-    } else {
-      note.textContent = '';
     }
+    addBtn.disabled = false;
     addBtn.textContent = 'Ajouter au panier';
     addBtn.onclick = () => addToCart(p.id, state.modalSelectedSize || 'TU');
   }
+
+  el('#alert-submit').addEventListener('click', async () => {
+    const email = el('#alert-email').value.trim();
+    const msg = el('#alert-msg');
+    if (!email) { msg.textContent = 'Renseigne ton email.'; return; }
+    const p = state.modalProduct;
+    try {
+      const res = await fetch('/api/stock-alerts', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: p.id, size: state.modalSelectedSize, email })
+      });
+      const data = await res.json().catch(() => ({}));
+      msg.textContent = res.ok ? 'C\'est noté, on te prévient dès que c\'est de retour !' : (data.error || 'Inscription impossible pour le moment.');
+    } catch (e) {
+      msg.textContent = 'Erreur réseau, réessaie.';
+    }
+  });
 
   el('#modal-close').addEventListener('click', () => closeProductModal());
   modal.addEventListener('click', (e) => { if (e.target === modal) closeProductModal(); });
@@ -648,6 +994,7 @@
   function addToCart(productId, size, qty = 1) {
     const key = cartKey(productId, size);
     state.cart[key] = (state.cart[key] || 0) + qty;
+    state.promo = null; // le panier change : le code promo doit etre re-valide
     saveCart();
     renderCartDrawer();
     showToast('Ajouté au panier');
@@ -656,6 +1003,7 @@
   function setQty(key, qty) {
     if (qty <= 0) delete state.cart[key];
     else state.cart[key] = qty;
+    state.promo = null;
     saveCart();
     renderCartDrawer();
   }
@@ -689,6 +1037,84 @@
     return flat;
   }
 
+  // Barre "Plus que X pour la livraison offerte"
+  function renderCartProgress(subtotal) {
+    const box = el('#cart-progress');
+    const th = state.config.freeShippingThresholdCents;
+    const flat = state.config.shippingFlatCents || 0;
+    if (th == null || flat === 0 || subtotal <= 0) { box.style.display = 'none'; return; }
+    const target = th / 100;
+    const remaining = target - subtotal;
+    box.style.display = 'block';
+    if (remaining > 0) {
+      const pct = Math.min(100, Math.round((subtotal / target) * 100));
+      box.innerHTML = `
+        <div class="progress-text">Plus que <strong>${fmt(remaining)}</strong> pour la livraison offerte</div>
+        <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>`;
+    } else {
+      box.innerHTML = `
+        <div class="progress-text">🎉 Livraison offerte sur cette commande !</div>
+        <div class="progress-track"><div class="progress-fill done" style="width:100%"></div></div>`;
+    }
+  }
+
+  // Suggestions dans le panier : pieces pas encore dans le panier, categories proches en premier
+  function cartSuggestionsHtml() {
+    const inCartIds = new Set(Object.keys(state.cart).map(k => parseInt(k.split('::')[0], 10)));
+    const cartCats = new Set([...inCartIds].map(id => (state.products.find(p => p.id === id) || {}).category).filter(Boolean));
+    const candidates = state.products.filter(p => p.inStock && !inCartIds.has(p.id));
+    candidates.sort((a, b) => (cartCats.has(b.category) ? 1 : 0) - (cartCats.has(a.category) ? 1 : 0));
+    const list = candidates.slice(0, 3);
+    if (list.length === 0) return '';
+    return `
+      <div class="cart-suggest">
+        <p class="suggest-title">Vous aimerez aussi</p>
+        <div class="suggest-row">
+          ${list.map(p => `
+            <button type="button" class="suggest-item" data-id="${p.id}">
+              ${p.imageUrl ? `<img src="${p.imageUrl}" alt="${p.name}" loading="lazy">` : '<div class="tile-ph"></div>'}
+              <span class="suggest-name">${p.name}</span>
+              <span class="suggest-price">${fmt(p.finalPrice)}</span>
+            </button>
+          `).join('')}
+        </div>
+      </div>`;
+  }
+
+  // Calcule et affiche sous-total, reductions, livraison et total
+  function updateTotals() {
+    const L = state.config.loyalty || {};
+    const subtotal = cartSubtotal();
+    const shipping = shippingAmount(subtotal);
+    const promoAmount = state.promo ? (state.promo.discountCents || 0) / 100 : 0;
+    let loyaltyAmount = 0;
+    if (state.config.testCheckout && state.customer && state.redeemPoints) {
+      loyaltyAmount = (checkoutMaxRedeemablePoints() * (L.pointValueCents || 0)) / 100;
+    }
+
+    el('#cart-subtotal').textContent = fmt(subtotal);
+    el('#cart-shipping').textContent = shipping > 0 ? fmt(shipping) : 'Offerte';
+
+    const promoRow = el('#cart-promo-row');
+    if (promoAmount > 0) {
+      promoRow.style.display = 'flex';
+      el('#cart-promo-label').textContent = `Code ${state.promo.code}`;
+      el('#cart-promo-amount').textContent = `− ${fmt(promoAmount)}`;
+    } else {
+      promoRow.style.display = 'none';
+    }
+
+    const loyaltyRow = el('#cart-loyalty-row');
+    if (loyaltyAmount > 0) {
+      loyaltyRow.style.display = 'flex';
+      el('#cart-loyalty-amount').textContent = `− ${fmt(loyaltyAmount)}`;
+    } else {
+      loyaltyRow.style.display = 'none';
+    }
+
+    cartTotalEl.textContent = fmt(Math.max(0, subtotal + shipping - promoAmount - loyaltyAmount));
+  }
+
   function renderCartDrawer() {
     const entries = Object.entries(state.cart);
     if (entries.length === 0) {
@@ -699,6 +1125,9 @@
       cartTotalEl.textContent = fmt(0);
       el('#cart-subtotal').textContent = fmt(0);
       el('#cart-shipping').textContent = fmt(0);
+      el('#cart-promo-row').style.display = 'none';
+      el('#cart-loyalty-row').style.display = 'none';
+      el('#cart-progress').style.display = 'none';
       el('#paypal-buttons-container').innerHTML = '';
       el('#test-checkout-form').style.display = 'none';
       return;
@@ -723,7 +1152,7 @@
           </div>
         </div>
       `;
-    }).join('');
+    }).join('') + cartSuggestionsHtml();
 
     cartItemsEl.querySelectorAll('.cart-item').forEach(row => {
       const key = row.dataset.key;
@@ -732,12 +1161,11 @@
       row.querySelector('.qty-plus').addEventListener('click', () => setQty(key, currentQty + 1));
       row.querySelector('.remove-link').addEventListener('click', () => setQty(key, 0));
     });
+    cartItemsEl.querySelectorAll('.suggest-item').forEach(b => {
+      b.addEventListener('click', () => { closeCart(); openProductModal(parseInt(b.dataset.id, 10)); });
+    });
 
-    const subtotal = cartSubtotal();
-    const shipping = shippingAmount(subtotal);
-    el('#cart-subtotal').textContent = fmt(subtotal);
-    el('#cart-shipping').textContent = shipping > 0 ? fmt(shipping) : 'Offerte';
-    cartTotalEl.textContent = fmt(subtotal + shipping);
+    renderCartProgress(cartSubtotal());
 
     if (state.config.testCheckout) {
       el('#test-checkout-form').style.display = 'block';
@@ -747,7 +1175,33 @@
       el('#test-checkout-form').style.display = 'none';
       renderPaypalButtons();
     }
+    updateTotals();
   }
+
+  // ---------- Code promo ----------
+  el('#promo-apply').addEventListener('click', async () => {
+    const code = el('#promo-input').value.trim();
+    const msg = el('#promo-msg');
+    msg.textContent = '';
+    if (!code) return;
+    try {
+      const res = await fetch('/api/promo/validate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code,
+          subtotalCents: Math.round(cartSubtotal() * 100),
+          email: state.customer ? state.customer.email : (el('#cf-email').value.trim() || null)
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { state.promo = null; msg.textContent = data.error || 'Code invalide.'; updateTotals(); return; }
+      state.promo = { code: data.code || code.toUpperCase(), discountCents: data.discountCents || 0, label: data.label || '' };
+      msg.textContent = data.label || 'Code appliqué !';
+      updateTotals();
+    } catch (e) {
+      msg.textContent = 'Erreur réseau, réessaie.';
+    }
+  });
 
   // ---------- Checkout : zone compte / invitee / fidelite ----------
   function checkoutMaxRedeemablePoints() {
@@ -791,6 +1245,7 @@
         `;
         el('#cf-redeem-points').addEventListener('change', (e) => {
           state.redeemPoints = e.target.checked;
+          updateTotals();
         });
       } else {
         loyaltyBox.style.display = 'none';
@@ -838,6 +1293,11 @@
       }
     }
 
+    if (state.promo) payload.promoCode = state.promo.code;
+    if (state.config.giftNoteEnabled && el('#cf-gift').checked) {
+      payload.giftNote = el('#cf-gift-note').value.trim();
+    }
+
     payload.items = Object.keys(state.cart).map(key => {
       const [idStr, size] = key.split('::');
       return { productId: parseInt(idStr, 10), size, qty: state.cart[key] };
@@ -861,6 +1321,7 @@
       }
       state.cart = {};
       state.redeemPoints = false;
+      state.promo = null;
       saveCart();
       if (!state.customer) { await loadCustomer(); } // recharge si un compte vient d'etre cree pendant la commande
       window.location.href = `/commande/${data.token}`;
@@ -907,10 +1368,12 @@
           const [idStr, size] = key.split('::');
           return { productId: parseInt(idStr, 10), size, qty: state.cart[key] };
         });
+        const body = { items };
+        if (state.promo) body.promoCode = state.promo.code;
         const res = await fetch('/api/paypal/create-order', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items })
+          body: JSON.stringify(body)
         });
         const data = await res.json();
         if (!res.ok) { showToast(data.error || 'Erreur lors de la création de la commande'); throw new Error(data.error); }
@@ -921,14 +1384,14 @@
         const result = await res.json();
         if (result.status === 'paid') {
           state.cart = {};
+          state.promo = null;
           saveCart();
           closeCart();
           if (result.token) {
             window.location.href = `/commande/${result.token}`;
           } else {
             await loadProducts();
-            renderGrid();
-            renderTrending();
+            renderAllGrids();
             showToast('Merci ! Votre commande est confirmée.');
           }
         } else {
@@ -955,6 +1418,30 @@
   el('#open-cart').addEventListener('click', openCart);
   el('#close-cart').addEventListener('click', closeCart);
   overlay.addEventListener('click', closeCart);
+
+  // ---------- Newsletter ----------
+  el('#newsletter-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = el('#newsletter-email').value.trim();
+    const msg = el('#newsletter-msg');
+    msg.textContent = '';
+    if (!email) return;
+    try {
+      const res = await fetch('/api/newsletter', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        msg.textContent = data.message || 'Merci, tu es inscrite !';
+        el('#newsletter-email').value = '';
+      } else {
+        msg.textContent = data.error || 'Inscription impossible pour le moment.';
+      }
+    } catch (err) {
+      msg.textContent = 'Erreur réseau, réessaie.';
+    }
+  });
 
   // ---------- URL produit dediee ----------
   function openProductFromUrl() {
@@ -983,17 +1470,17 @@
         await loadProducts();
         renderCategoryDropdown();
         renderFilters();
-        renderGrid();
-        renderTrending();
+        renderUniverses();
+        renderAllGrids();
         if (drawer.classList.contains('open')) renderCartDrawer();
       });
       source.onerror = () => { /* le navigateur retente automatiquement */ };
     } catch (e) { /* SSE indisponible, tant pis, pas bloquant */ }
   }
 
-  // Rafraîchit les comptes a rebours des ventes flash chaque minute
+  // Rafraichit les comptes a rebours des ventes flash chaque minute
   setInterval(() => {
-    if (!el('#trending').style.display || el('#trending').style.display !== 'none') renderTrending();
+    if (el('#trending').style.display !== 'none') renderTrending();
     if (state.modalProduct && modal.classList.contains('open')) renderSizePicker();
   }, 60000);
 
@@ -1002,13 +1489,17 @@
     el('#year').textContent = new Date().getFullYear();
     await loadConfig();
     await Promise.all([loadProducts(), loadCustomer()]);
+    renderAnnounce();
+    renderReassurance();
+    renderNextDrop();
     renderCategoryDropdown();
     renderFilters();
-    renderGrid();
-    renderTrending();
+    renderUniverses();
+    renderAllGrids();
     renderCartCount();
     renderWishlistCount();
     connectRealtime();
     openProductFromUrl();
+    loadReviews();
   })();
 })();
