@@ -9,6 +9,11 @@
 </head>
 <body>
 
+<!-- Bandeau d'annonces (messages qui défilent, remplis par app.js) -->
+<div class="announce-bar" id="announce-bar" style="display:none;">
+  <div class="announce-text" id="announce-text"></div>
+</div>
+
 <header class="site-header">
   <div class="wrap">
     <a href="/" class="logo">Aube</a>
@@ -49,7 +54,38 @@
   </div>
 </section>
 
+<!-- Pastilles de réassurance -->
+<section class="reassurance" id="reassurance">
+  <div class="wrap reassurance-grid" id="reassurance-grid"></div>
+</section>
+
 <main>
+  <!-- Teaser de la prochaine collection (affiché seulement si une date est fournie par le serveur) -->
+  <section class="section next-drop" id="next-drop" style="display:none;">
+    <div class="wrap">
+      <p class="kicker">Prochaine collection</p>
+      <h2 id="next-drop-title"></h2>
+      <p class="next-drop-text" id="next-drop-text"></p>
+      <div class="countdown" id="next-drop-countdown">
+        <div><span id="cd-days">0</span><small>Jours</small></div>
+        <div><span id="cd-hours">0</span><small>Heures</small></div>
+        <div><span id="cd-mins">0</span><small>Minutes</small></div>
+        <div><span id="cd-secs">0</span><small>Secondes</small></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Coups de cœur de la boutique (pièces marquées "featured" côté serveur) -->
+  <section class="section" id="featured" style="display:none;">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="featured-title">Nos coups de cœur</h2>
+        <span class="count" id="featured-count"></span>
+      </div>
+      <div class="grid" id="featured-grid"></div>
+    </div>
+  </section>
+
   <section class="section" id="trending" style="display:none;">
     <div class="wrap">
       <div class="section-head">
@@ -57,6 +93,16 @@
         <span class="count" id="trending-count"></span>
       </div>
       <div class="grid" id="trending-grid"></div>
+    </div>
+  </section>
+
+  <!-- Explorez nos univers : une tuile par catégorie -->
+  <section class="section" id="universes" style="display:none;">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Explorez nos univers</h2>
+      </div>
+      <div class="tiles" id="universes-grid"></div>
     </div>
   </section>
 
@@ -81,6 +127,16 @@
     </div>
   </section>
 
+  <!-- Avis clientes (affichés seulement si le serveur en fournit) -->
+  <section class="section" id="reviews" style="display:none;">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Elles en parlent</h2>
+      </div>
+      <div class="reviews-grid" id="reviews-grid"></div>
+    </div>
+  </section>
+
   <section class="section" id="about" style="padding-top:0;">
     <div class="wrap" style="max-width:640px;">
       <h2 style="font-size:26px; margin-bottom:16px;">L'atelier</h2>
@@ -90,7 +146,35 @@
 </main>
 
 <footer class="site-footer" id="footer">
-  <div class="wrap" style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:12px; width:100%;">
+  <div class="wrap footer-grid">
+    <div class="footer-col">
+      <div class="footer-logo">Aube</div>
+      <p class="footer-about">Une petite collection, choisie avec soin. Des pièces pour durer.</p>
+    </div>
+    <div class="footer-col">
+      <h4>Infos pratiques</h4>
+      <button type="button" class="footer-link" data-info="livraison">Livraison</button>
+      <button type="button" class="footer-link" data-info="retours">Retours &amp; échanges</button>
+      <button type="button" class="footer-link" data-info="fidelite">Programme fidélité</button>
+      <button type="button" class="footer-link" data-info="contact">Contact</button>
+    </div>
+    <div class="footer-col">
+      <h4>Informations légales</h4>
+      <button type="button" class="footer-link" data-info="cgv">Conditions générales de vente</button>
+      <button type="button" class="footer-link" data-info="mentions">Mentions légales</button>
+      <button type="button" class="footer-link" data-info="confidentialite">Politique de confidentialité</button>
+    </div>
+    <div class="footer-col" id="newsletter-box" style="display:none;">
+      <h4>Newsletter</h4>
+      <p class="footer-about">Sorties de collections et offres exclusives.</p>
+      <form id="newsletter-form" class="newsletter-form">
+        <input type="email" id="newsletter-email" placeholder="Ton adresse email" required>
+        <button type="submit" class="btn wine">S'inscrire</button>
+      </form>
+      <p class="hint" id="newsletter-msg"></p>
+    </div>
+  </div>
+  <div class="wrap footer-bottom">
     <span>© <span id="year"></span> Aube</span>
     <span id="footer-payment-note">Paiement sécurisé par PayPal · Carte bancaire acceptée</span>
   </div>
@@ -103,9 +187,22 @@
     <h3>Votre panier</h3>
     <button class="icon-btn" id="close-cart">&times;</button>
   </div>
+  <!-- Barre de progression vers la livraison offerte -->
+  <div class="cart-progress" id="cart-progress" style="display:none;"></div>
   <div class="drawer-body" id="cart-items"></div>
   <div class="drawer-foot" id="cart-foot">
+    <!-- Code promo (affiché seulement si le serveur l'active) -->
+    <div class="promo-box" id="promo-box" style="display:none;">
+      <div class="promo-row">
+        <input type="text" id="promo-input" placeholder="Code promo" autocomplete="off">
+        <button type="button" class="btn secondary" id="promo-apply">Appliquer</button>
+      </div>
+      <p class="hint" id="promo-msg"></p>
+    </div>
+
     <div class="cart-total-row small"><span>Sous-total</span><span id="cart-subtotal">0,00&nbsp;€</span></div>
+    <div class="cart-total-row small" id="cart-promo-row" style="display:none;"><span id="cart-promo-label">Code promo</span><span id="cart-promo-amount"></span></div>
+    <div class="cart-total-row small" id="cart-loyalty-row" style="display:none;"><span>Points fidélité</span><span id="cart-loyalty-amount"></span></div>
     <div class="cart-total-row small"><span>Livraison</span><span id="cart-shipping">0,00&nbsp;€</span></div>
     <div class="cart-total-row"><span>Total</span><span id="cart-total">0,00&nbsp;€</span></div>
 
@@ -133,6 +230,17 @@
         <div class="field-row">
           <div class="field"><label for="cf-postal">Code postal</label><input type="text" id="cf-postal"></div>
           <div class="field"><label for="cf-city">Ville</label><input type="text" id="cf-city"></div>
+        </div>
+
+        <!-- Message cadeau (affiché seulement si le serveur l'active) -->
+        <div class="gift-box" id="gift-box" style="display:none;">
+          <label class="check-line">
+            <input type="checkbox" id="cf-gift"> C'est un cadeau
+          </label>
+          <div class="field" id="gift-note-field" style="display:none;">
+            <label for="cf-gift-note">Petit mot à glisser dans le colis</label>
+            <input type="text" id="cf-gift-note" maxlength="200">
+          </div>
         </div>
 
         <div id="checkout-loyalty-box" class="loyalty-box" style="display:none;"></div>
@@ -209,12 +317,30 @@
       <div class="modal-badges" id="modal-badges"></div>
       <h2 id="modal-name"></h2>
       <p class="price" id="modal-price"></p>
+      <p class="preorder-note" id="modal-preorder" style="display:none;"></p>
       <p class="desc" id="modal-desc"></p>
       <div class="size-picker" id="modal-sizes"></div>
       <button type="button" class="size-guide-link" id="size-guide-link">Guide des tailles</button>
       <p class="stock-note" id="modal-stock-note"></p>
+
+      <!-- Alerte "me prévenir du retour en stock" (affichée seulement si le serveur l'active) -->
+      <div class="stock-alert" id="modal-alert" style="display:none;">
+        <p>Cette taille est épuisée. Laisse ton email, on te prévient dès son retour.</p>
+        <div class="alert-row">
+          <input type="email" id="alert-email" placeholder="ton@email.fr">
+          <button type="button" class="btn wine" id="alert-submit">Me prévenir</button>
+        </div>
+        <p class="hint" id="alert-msg"></p>
+      </div>
+
       <button class="btn wine" id="modal-add">Ajouter au panier</button>
+      <ul class="perks" id="modal-perks"></ul>
       <button type="button" class="share-link" id="modal-share">Copier le lien de cette pièce</button>
+
+      <div class="related" id="modal-related-wrap" style="display:none;">
+        <h4>Vous aimerez aussi</h4>
+        <div class="related-grid" id="modal-related"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -253,6 +379,17 @@
         </table>
       </div>
       <p class="hint">Comment prendre ses mesures : poitrine à l'endroit le plus fort, taille au niveau le plus fin, hanches à l'endroit le plus fort, mètre ruban à plat sans serrer.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Pages d'information (livraison, retours, fidélité, légal...) -->
+<div class="modal" id="info-modal">
+  <div class="modal-card size-guide-card">
+    <div class="modal-info" style="grid-column:1/-1;">
+      <button class="modal-close" id="info-close">&times;</button>
+      <h2 id="info-title"></h2>
+      <div class="info-body" id="info-body"></div>
     </div>
   </div>
 </div>
