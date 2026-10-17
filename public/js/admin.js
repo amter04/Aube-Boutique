@@ -92,11 +92,14 @@
   // ---------- Tabs ----------
   function selectTab(target) {
     document.querySelectorAll('.admin-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === target));
-    ['dashboard', 'products', 'orders', 'team', 'settings'].forEach(name => {
-      el('#tab-' + name).style.display = name === target ? 'block' : 'none';
+    ['dashboard', 'products', 'orders', 'customers', 'promos', 'team', 'settings'].forEach(name => {
+      const tabEl = el('#tab-' + name);
+      if (tabEl) tabEl.style.display = name === target ? 'block' : 'none';
     });
     if (target === 'orders') loadOrders();
     if (target === 'dashboard') loadStats();
+    if (target === 'customers') loadCustomers();
+    if (target === 'promos') loadPromos();
     if (target === 'team') loadEmployees();
   }
 
@@ -198,7 +201,7 @@
     `).join('');
   }
 
-  // ---------- Settings (frais de livraison, paiement, fidelite) ----------
+  // ---------- Settings ----------
   async function loadSettings() {
     const res = await fetch('/api/admin/settings');
     if (res.status === 401) return;
@@ -267,6 +270,87 @@
       </tr>
     `).join('');
   }
+
+  // ---------- Codes promo ----------
+  async function loadPromos() {
+    const res = await fetch('/api/admin/promos');
+    if (res.status === 401) return showLogin();
+    const promos = await res.json();
+    const tbody = el('#promo-rows');
+    
+    if (!promos || promos.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="color:#918A80; padding:18px 10px;">Aucun code promo créé.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = promos.map(p => `
+      <tr data-id="${p.id}" data-active="${p.active}">
+        <td><strong>${esc(p.code)}</strong></td>
+        <td>${p.type === 'percent' ? `-${p.value}%` : `-${p.value} €`}</td>
+        <td>${p.minSubtotalCents ? fmt(p.minSubtotalCents / 100) : 'Aucun'}</td>
+        <td>${p.usesCount || 0} ${p.maxUses ? `/ ${p.maxUses}` : ''}</td>
+        <td>${p.active ? '<span style="color:var(--ok, green);">Actif</span>' : 'Inactif'}</td>
+        <td>
+          <div class="row-actions">
+            <button class="toggle-promo-btn">${p.active ? 'Désactiver' : 'Activer'}</button>
+            <button class="danger del-promo-btn">Supprimer</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+
+    tbody.querySelectorAll('tr').forEach(row => {
+      const id = row.dataset.id;
+      const active = row.dataset.active === 'true';
+
+      row.querySelector('.toggle-promo-btn').addEventListener('click', async () => {
+        await fetch(`/api/admin/promos/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ active: !active })
+        });
+        loadPromos();
+      });
+
+      row.querySelector('.del-promo-btn').addEventListener('click', async () => {
+        if (!confirm('Supprimer ce code promo ?')) return;
+        await fetch(`/api/admin/promos/${id}`, { method: 'DELETE' });
+        showToast('Code promo supprimé');
+        loadPromos();
+      });
+    });
+  }
+
+  el('#promo-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    el('#promo-error').textContent = '';
+
+    const body = {
+      code: el('#pm-code').value.trim(),
+      type: el('#pm-type').value,
+      value: parseFloat(el('#pm-value').value),
+      minSubtotal: el('#pm-min').value || null,
+      maxUses: el('#pm-max-uses').value || null,
+      startsAt: el('#pm-starts').value || null,
+      endsAt: el('#pm-ends').value || null
+    };
+
+    const res = await fetch('/api/admin/promos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      el('#promo-error').textContent = data.error || 'Erreur lors de la création';
+      return;
+    }
+
+    el('#promo-form').reset();
+    showToast('Code promo créé avec succès !');
+    loadPromos();
+  });
 
   // ---------- Category select ----------
   function refreshCategoryOptions(selected) {
@@ -567,7 +651,7 @@
         <div style="color:#77706A;">${o.payerName || 'Client'} ${o.payerEmail ? `· ${o.payerEmail}` : ''}</div>
         ${address ? `<div style="color:#918A80; font-size:13px;">${address}</div>` : ''}
         <div style="color:#918A80; font-size:13px;">${new Date(o.createdAt).toLocaleString('fr-FR')} · ${o.items.map(i => `${i.name}${i.size && i.size !== 'TU' ? ` (${i.size})` : ''} ×${i.qty}`).join(', ')}</div>
-        <div style="color:#918A80; font-size:12.5px; margin-top:4px;">Sous-total ${fmt(o.subtotal)} + livraison ${fmt(o.shipping)}${o.discount > 0 ? ` − ${fmt(o.discount)} (fidélité)` : ''}</div>
+        <div style="color:#918A80; font-size:12.5px; margin-top:4px;">Sous-total ${fmt(o.subtotal)} + livraison ${fmt(o.shipping)}${o.discount > 0 ? ` − ${fmt(o.discount)}` : ''}</div>
         ${(o.pointsEarned > 0 || o.pointsRedeemed > 0) ? `<div style="color:var(--wine); font-size:12.5px; margin-top:2px;">${o.pointsEarned > 0 ? `+${o.pointsEarned} points gagnés` : ''}${o.pointsEarned > 0 && o.pointsRedeemed > 0 ? ' · ' : ''}${o.pointsRedeemed > 0 ? `${o.pointsRedeemed} points utilisés` : ''}</div>` : ''}
       </div>
     `;
