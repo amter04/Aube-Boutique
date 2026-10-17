@@ -114,7 +114,7 @@
     }
   }
 
-  // Actualisation automatique des commandes toutes les 60 s (sans écraser ce qu'on est en train de saisir)
+  // Actualisation automatique des commandes toutes les 60 s
   setInterval(async () => {
     if (!state.role || state.tab === 'stock') return;
     const active = document.activeElement;
@@ -277,7 +277,6 @@
 
     let list = state.orders.filter(o => state.orderFilter === 'all' || fulfillmentOf(o) === state.orderFilter);
     list = list.filter(o => matchesOrderSearch(o, state.orderSearch));
-    // À préparer : les plus anciennes d'abord (premier arrivé, premier servi). Sinon : les plus récentes d'abord.
     list.sort((a, b) => state.orderFilter === 'to_prepare'
       ? new Date(a.createdAt) - new Date(b.createdAt)
       : new Date(b.createdAt) - new Date(a.createdAt));
@@ -306,6 +305,14 @@
     const address = lines.length
       ? `<div class="eq-address"><strong>${esc(o.payerName || (o.customer && o.customer.name) || '')}</strong><br>${lines.map(esc).join('<br>')}</div>`
       : `<div class="eq-address eq-warn"><strong>${esc(o.payerName || 'Client')}</strong><br>Adresse de livraison non renseignée${o.source === 'paypal' ? ' (commande PayPal)' : ''}.</div>`;
+
+    // Bloc Option Cadeau s'il existe
+    const giftHtml = (o.ext && o.ext.giftNote) ? `
+      <div style="margin-top:10px; padding:10px; background:#fff8ef; border-left:3px solid #800020; font-size:13px; border-radius:4px;">
+        <strong>🎁 Option Cadeau :</strong><br>
+        <em style="color:#4a433c;">« ${esc(o.ext.giftNote)} »</em>
+      </div>
+    ` : '';
 
     let buttons = '';
     if (f === 'to_prepare') {
@@ -344,6 +351,7 @@
           <div>
             <p class="eq-label">Livraison</p>
             ${address}
+            ${giftHtml}
             <div class="eq-total">Montant de la commande : ${fmt(o.total)}</div>
             ${tracking}
           </div>
@@ -448,6 +456,14 @@
         <td>${esc(sizeLabel(it.size))}</td>
         <td class="q">× ${it.qty}</td>
       </tr>`).join('');
+
+    const giftSlipHtml = (o.ext && o.ext.giftNote) ? `
+      <div style="margin: 18px 0; padding: 12px 16px; border: 1.5px dashed #111; background: #fafafa;">
+        <h2 style="font-size: 11px; text-transform: uppercase; letter-spacing: .08em; margin: 0 0 6px;">Message cadeau</h2>
+        <div style="font-size: 14px; font-style: italic;">« ${esc(o.ext.giftNote)} »</div>
+      </div>
+    ` : '';
+
     return `
       <div class="page">
         <h1>BORDEREAU D'EXPÉDITION</h1>
@@ -462,6 +478,7 @@
             <div class="dest"><strong>${esc(name)}</strong><br>${lines.length ? lines.map(esc).join('<br>') : '<em>Adresse non renseignée</em>'}</div>
           </div>
         </div>
+        ${giftSlipHtml}
         <h2 style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#555; margin:0;">Contenu du colis</h2>
         <table>
           <thead><tr><th>Article</th><th>Taille</th><th>Qté</th></tr></thead>
@@ -480,7 +497,6 @@
   function printPickList() {
     const orders = state.orders.filter(o => fulfillmentOf(o) === 'to_prepare');
     if (!orders.length) return;
-    // On regroupe par pièce + taille pour aller chercher les articles en une seule tournée
     const map = new Map();
     orders.forEach(o => o.items.forEach(it => {
       const key = `${it.productId}::${it.size}`;
@@ -489,7 +505,7 @@
       entry.qty += it.qty;
       if (!entry.orders.includes(o.id)) entry.orders.push(o.id);
     }));
-    const lines = [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'fr') || String(a.size).localeCompare(String(b.size)));
+    const lines = [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'fr') || String(a.size).localeCompare(String(a.size)));
     const totalPieces = lines.reduce((s, l) => s + l.qty, 0);
     const rows = lines.map(l => `
       <tr>
@@ -570,7 +586,7 @@
             <input type="number" min="0" class="eq-stock-input" data-key="${esc(key)}" value="${target}">
             <button type="button" data-action="plus" data-key="${esc(key)}" aria-label="Ajouter 1">+</button>
           </div>
-          <span class="eq-size-note ${delta !== 0 ? 'delta' : ''}">${delta !== 0 ? `Actuel ${s.stock} → ${target} (${delta > 0 ? '+' : ''}${delta})` : `En stock : ${s.stock}`}</span>
+          <span class="eq-size-note ${delta !== 0 ? 'delta' : ''}">${delta !== 0 ? `Actuel ${s.stock} →${target} (${delta > 0 ? '+' : ''}${delta})` : `En stock : ${s.stock}`}</span>
         </div>`;
     }).join('');
     return `
@@ -590,7 +606,6 @@
       </div>`;
   }
 
-  // Met à jour une quantité saisie sans recréer toute la liste (pour ne pas perdre le focus)
   function setTarget(key, value) {
     const [pidStr, ...rest] = key.split('::');
     const size = rest.join('::');
@@ -631,8 +646,6 @@
     const btn = el(`.eq-prod[data-pid="${pid}"] [data-action="save"]`);
     if (btn) btn.disabled = true;
     try {
-      // On relit le stock actuel juste avant d'enregistrer : si une vente a eu lieu entre-temps,
-      // on applique la différence saisie sur le stock réel, au lieu d'écraser la vente.
       const fresh = await fetchJson('/api/admin/products');
       const fp = fresh.find(x => x.id === pid);
       if (!fp) { showToast('Cette pièce n\'existe plus.'); return; }
@@ -651,7 +664,7 @@
       });
       if (res.status === 401) { showLogin(); return; }
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { showToast(data.error || 'Erreur, le stock n\'a pas été modifié.'); return; }
+      if (!res.ok) { showToast(data.error || 'Erreur, le stock n\'a pas été modified.'); return; }
 
       changes.forEach(c => delete state.stockEdits[editKey(pid, c.size)]);
       state.products = await fetchJson('/api/admin/products');
