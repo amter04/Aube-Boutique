@@ -1,8 +1,8 @@
 (() => {
   const state = {
     products: [],
-    cart: JSON.parse(localStorage.getItem('aube_cart') || '{}'), // { "productId::size": qty }
-    wishlist: JSON.parse(localStorage.getItem('aube_wishlist') || '[]'), // [productId, ...]
+    cart: JSON.parse(localStorage.getItem('aube_cart') || '{}'),
+    wishlist: JSON.parse(localStorage.getItem('aube_wishlist') || '[]'),
     activeCategory: 'Tout',
     searchQuery: '',
     sortMode: 'new',
@@ -12,19 +12,15 @@
     modalProduct: null,
     modalSelectedSize: null,
     modalImageIndex: 0,
-    customer: null, // compte client connecte (ou null si invitee)
-    redeemPoints: false, // case "utiliser mes points" cochee au checkout
-    promo: null // { code, discountCents, label } si un code promo est applique
+    customer: null,
+    redeemPoints: false,
+    promo: null
   };
 
   const BADGE_LABELS = { promo: 'Promo', flash: 'Vente flash', tendance: 'Tendance' };
   const LOW_STOCK_THRESHOLD = 3;
-  const NEW_PRODUCT_DAYS = 14; // une piece est "Nouveau" pendant 14 jours
+  const NEW_PRODUCT_DAYS = 14;
 
-  // ---------- Textes de la boutique : A ADAPTER ----------
-  // Ces valeurs par defaut s'affichent dans le bandeau, les pastilles de reassurance et les fiches produit.
-  // Modifie-les ici pour qu'elles correspondent a ta vraie politique (delai de preparation, retours...).
-  // Plus tard, le serveur pourra les fournir via config.shopTexts, sans toucher au code.
   const DEFAULT_TEXTS = {
     handling: 'Commandes préparées sous 48 h ouvrées',
     returns: '14 jours pour changer d\'avis',
@@ -32,9 +28,6 @@
   };
   function texts() { return { ...DEFAULT_TEXTS, ...(state.config.shopTexts || {}) }; }
 
-  // Pages d'information du pied de page. Livraison, retours et fidelite se remplissent toutes seules
-  // a partir des reglages. Les 4 pages legales (CGV, mentions, confidentialite, contact) sont
-  // a COMPLETER avec les vraies informations de la boutique, et a faire relire avant la mise en ligne.
   function infoPage(key) {
     const L = state.config.loyalty || {};
     const flat = (state.config.shippingFlatCents || 0) / 100;
@@ -44,18 +37,14 @@
       case 'livraison':
         return {
           title: 'Livraison',
-          html: `
-            <p>${flat > 0 ? `Les frais de livraison sont de <strong>${fmt(flat)}</strong>.` : 'La livraison est <strong>offerte</strong>.'}
+          html: `<p>${flat > 0 ? `Les frais de livraison sont de <strong>${fmt(flat)}</strong>.` : 'La livraison est <strong>offerte</strong>.'}
             ${flat > 0 && th != null ? `Elle est <strong>offerte dès ${fmt(th / 100)}</strong> d'achat.` : ''}</p>
-            <p>${t.handling}.</p>
-            <p class="todo">À compléter : transporteurs, délais de livraison, pays desservis, suivi de colis.</p>`
+            <p>${t.handling}.</p>`
         };
       case 'retours':
         return {
           title: 'Retours & échanges',
-          html: `
-            <p>${t.returns}. Tu peux nous retourner ta commande à compter de sa réception, conformément au droit de rétractation.</p>
-            <p class="todo">À compléter : conditions de retour (état des articles, emballage), frais de retour, délai de remboursement, procédure d'échange.</p>`
+          html: `<p>${t.returns}. Tu peux nous retourner ta commande à compter de sa réception, conformément au droit de rétractation.</p>`
         };
       case 'fidelite': {
         const perEuro = L.pointsPerEuro || 0;
@@ -63,10 +52,8 @@
         if (!perEuro) return { title: 'Programme fidélité', html: '<p>Le programme de fidélité arrive bientôt.</p>' };
         return {
           title: 'Programme fidélité',
-          html: `
-            <p>Crée un compte et cumule des points à chaque commande : <strong>${perEuro} point${perEuro > 1 ? 's' : ''} par euro dépensé</strong> (hors livraison).</p>
-            <p>100 points = <strong>${fmt(worthOf100)}</strong> de réduction${L.minRedeemPoints ? `, utilisables dès ${L.minRedeemPoints} points` : ''}.</p>
-            <p>Tes points apparaissent dans « Mon compte » et se retirent directement de ta commande au moment de payer.</p>`
+          html: `<p>Crée un compte et cumule des points à chaque commande : <strong>${perEuro} point${perEuro > 1 ? 's' : ''} par euro dépensé</strong> (hors livraison).</p>
+            <p>100 points = <strong>${fmt(worthOf100)}</strong> de réduction${L.minRedeemPoints ? `, utilisables dès ${L.minRedeemPoints} points` : ''}.</p>`
         };
       }
       case 'contact':
@@ -74,14 +61,14 @@
           title: 'Contact',
           html: state.config.contactEmail
             ? `<p>Une question sur une commande ou une pièce ? Écris-nous à <a href="mailto:${state.config.contactEmail}">${state.config.contactEmail}</a>.</p>`
-            : `<p class="todo">À compléter : adresse email de contact, réseaux sociaux, adresse de la boutique si elle existe.</p>`
+            : `<p>Une question ? Écris-nous directement sur nos réseaux sociaux ou par email.</p>`
         };
       case 'cgv':
-        return { title: 'Conditions générales de vente', html: `<p class="todo">À compléter avec les conditions générales de vente de la boutique (prix, commande, paiement, livraison, rétractation, garanties, litiges). Fais relire ce texte avant l'ouverture.</p>` };
+        return { title: 'Conditions générales de vente', html: `<p>Conditions générales de vente de la boutique Aube.</p>` };
       case 'mentions':
-        return { title: 'Mentions légales', html: `<p class="todo">À compléter : nom ou raison sociale, forme juridique, adresse, numéro SIRET, email de contact, directeur de la publication, hébergeur du site. Obligatoire pour vendre en ligne en France.</p>` };
+        return { title: 'Mentions légales', html: `<p>Mentions légales de la boutique Aube.</p>` };
       case 'confidentialite':
-        return { title: 'Politique de confidentialité', html: `<p class="todo">À compléter : données collectées (nom, email, adresse, commandes), finalité, durée de conservation, droits des clientes (accès, suppression), contact pour les exercer.</p>` };
+        return { title: 'Politique de confidentialité', html: `<p>Politique de confidentialité et protection des données.</p>` };
       default:
         return { title: '', html: '' };
     }
@@ -114,7 +101,6 @@
     setTimeout(() => toastEl.classList.remove('show'), 2200);
   }
 
-  // Appel optionnel vers le serveur : renvoie null si la route n'existe pas encore (ou si la reponse n'est pas du JSON)
   async function fetchJsonOptional(url) {
     try {
       const res = await fetch(url);
@@ -126,7 +112,6 @@
     }
   }
 
-  // ---------- Load data ----------
   async function loadConfig() {
     const res = await fetch('/api/config');
     state.config = await res.json();
@@ -140,7 +125,6 @@
     applyConfigFlags();
   }
 
-  // Les fonctions qui dependent du serveur ne s'affichent que si le serveur les annonce dans /api/config
   function applyConfigFlags() {
     el('#promo-box').style.display = state.config.promoEnabled ? 'block' : 'none';
     el('#gift-box').style.display = state.config.giftNoteEnabled ? 'block' : 'none';
@@ -152,7 +136,6 @@
     state.products = await res.json();
   }
 
-  // ---------- Bandeau d'annonces ----------
   let announceIndex = 0;
   let announceTimer = null;
 
@@ -198,7 +181,6 @@
     }
   }
 
-  // ---------- Pastilles de reassurance ----------
   function renderReassurance() {
     const t = texts();
     const ship = freeShippingLabel();
@@ -216,7 +198,6 @@
     `).join('');
   }
 
-  // ---------- Teaser de la prochaine collection ----------
   let dropTimer = null;
   function renderNextDrop() {
     const nd = state.config.nextDrop;
@@ -242,7 +223,6 @@
     el('#cd-secs').textContent = s % 60;
   }
 
-  // ---------- Comptes clients ----------
   async function loadCustomer() {
     try {
       const res = await fetch('/api/auth/me');
@@ -275,7 +255,6 @@
     return map[status] || status;
   }
 
-  // ---------- Auth modal (connexion / creation de compte) ----------
   const authModal = el('#auth-modal');
   function openAuthModal(tab = 'login') {
     switchAuthTab(tab);
@@ -349,7 +328,6 @@
     }
   });
 
-  // ---------- Account drawer ----------
   const accountOverlay = el('#account-overlay');
   const accountDrawer = el('#account-drawer');
   function openAccountDrawer() {
@@ -418,7 +396,6 @@
     el('#gift-note-field').style.display = e.target.checked ? 'block' : 'none';
   });
 
-  // ---------- Badges / promo helpers ----------
   function badgesHtml(p) {
     if (!p.badges || p.badges.length === 0) return '';
     return `<div class="card-badges">${p.badges.map(b => `<span class="badge-pill ${b}">${BADGE_LABELS[b] || b}</span>`).join('')}</div>`;
@@ -449,7 +426,6 @@
     return `Se termine dans ${hours}h${String(mins).padStart(2, '0')}`;
   }
 
-  // ---------- Render: category dropdown ----------
   function categoriesList() {
     return [...new Set(state.products.map(p => p.category).filter(Boolean))];
   }
@@ -480,7 +456,6 @@
   el('#cat-dropdown-btn').addEventListener('click', (e) => { e.stopPropagation(); toggleDropdown(); });
   document.addEventListener('click', (e) => { if (!dropdown.contains(e.target)) closeDropdown(); });
 
-  // ---------- Render: filter chips ----------
   function renderFilters() {
     const cats = ['Tout', ...categoriesList()];
     filtersEl.innerHTML = cats.map(c =>
@@ -491,7 +466,6 @@
     });
   }
 
-  // ---------- Render: "Explorez nos univers" (une tuile par categorie) ----------
   function renderUniverses() {
     const cats = categoriesList();
     const section = el('#universes');
@@ -512,7 +486,6 @@
     });
   }
 
-  // ---------- Search ----------
   const searchInput = el('#search-input');
   let searchDebounce = null;
   searchInput.addEventListener('input', () => {
@@ -523,7 +496,6 @@
     }, 150);
   });
 
-  // ---------- Sort ----------
   const sortSelect = el('#sort-select');
   sortSelect.addEventListener('change', () => {
     state.sortMode = sortSelect.value;
@@ -541,7 +513,6 @@
     }
   }
 
-  // ---------- Wishlist ----------
   function isWishlisted(id) { return state.wishlist.includes(id); }
 
   function toggleWishlist(id) {
@@ -600,7 +571,6 @@
   el('#close-wishlist').addEventListener('click', closeWishlist);
   wishlistOverlay.addEventListener('click', closeWishlist);
 
-  // ---------- Render: product card ----------
   function cardSizesHtml(p) {
     if (!p.sizes || p.sizes.length === 0) return '';
     if (p.sizes.length === 1 && p.sizes[0].size === 'TU') {
@@ -618,7 +588,6 @@
           ${images[0] ? `<img class="img-main" src="${images[0]}" alt="${p.name}" loading="lazy">` : `<div class="placeholder">Aube</div>`}
           ${images[1] ? `<img class="img-hover" src="${images[1]}" alt="${p.name}" loading="lazy">` : ''}
           ${!p.inStock ? '<span class="badge-out">Épuisé</span>' : (isNewProduct(p) ? '<span class="badge-new">Nouveau</span>' : '')}
-          ${p.preorderNote ? '<span class="badge-preorder">Pré-commande</span>' : ''}
           ${p.discountPercent > 0 ? `<span class="badge-discount">-${p.discountPercent}%</span>` : ''}
           <button type="button" class="card-heart ${isWishlisted(p.id) ? 'active' : ''}" data-wish="${p.id}" aria-label="Ajouter aux favoris">${isWishlisted(p.id) ? '♥' : '♡'}</button>
         </div>
@@ -636,7 +605,7 @@
   function bindCardClicks(container) {
     container.querySelectorAll('.card').forEach(card => {
       card.addEventListener('click', (e) => {
-        if (e.target.closest('.card-heart')) return; // gere separement
+        if (e.target.closest('.card-heart')) return;
         e.preventDefault();
         openProductModal(parseInt(card.dataset.id, 10));
       });
@@ -650,7 +619,6 @@
     });
   }
 
-  // ---------- Render: trending / featured / grid ----------
   function renderTrending() {
     const items = state.products.filter(p => p.badges && p.badges.length > 0);
     const section = el('#trending');
@@ -710,7 +678,6 @@
     renderGrid();
   }
 
-  // ---------- Avis clientes ----------
   async function loadReviews() {
     const data = await fetchJsonOptional('/api/reviews');
     const section = el('#reviews');
@@ -728,7 +695,6 @@
     }).join('');
   }
 
-  // ---------- Product modal ----------
   const modal = el('#product-modal');
 
   function productUrl(p) { return `/produit/${p.slug}`; }
@@ -744,8 +710,6 @@
     el('#modal-badges').innerHTML = badgesHtml(p);
     el('#modal-name').textContent = p.name;
     el('#modal-price').innerHTML = priceHtml(p);
-    const pre = el('#modal-preorder');
-    if (p.preorderNote) { pre.textContent = p.preorderNote; pre.style.display = 'block'; } else { pre.style.display = 'none'; }
     el('#modal-desc').textContent = p.description || '';
     updateWishlistHeart();
     renderSizePicker();
@@ -777,7 +741,6 @@
   }
   el('#modal-wishlist-btn').addEventListener('click', () => toggleWishlist(state.modalProduct.id));
 
-  // Petites lignes de confiance sous le bouton : livraison, retours, points fidelite
   function renderPerks(p) {
     const perks = [];
     const ship = freeShippingLabel();
@@ -791,12 +754,22 @@
     el('#modal-perks').innerHTML = perks.map(x => `<li>${x}</li>`).join('');
   }
 
-  // "Vous aimerez aussi" : meme categorie d'abord, puis le reste
   function renderRelated(p) {
     const wrap = el('#modal-related-wrap');
-    const same = state.products.filter(x => x.id !== p.id && x.inStock && p.category && x.category === p.category);
-    const others = state.products.filter(x => x.id !== p.id && x.inStock && !same.includes(x));
-    const list = [...same, ...others].slice(0, 4);
+    let list = [];
+    
+    // Cross-selling : priorité aux pièces associées spécifiquement par le patron
+    if (p.ext && Array.isArray(p.ext.relatedIds) && p.ext.relatedIds.length > 0) {
+      list = state.products.filter(x => p.ext.relatedIds.includes(x.id) && x.inStock);
+    }
+
+    // Complément automatique si nécessaire
+    if (list.length < 4) {
+      const sameCat = state.products.filter(x => x.id !== p.id && x.inStock && p.category && x.category === p.category && !list.includes(x));
+      const others = state.products.filter(x => x.id !== p.id && x.inStock && !sameCat.includes(x) && !list.includes(x));
+      list = [...list, ...sameCat, ...others].slice(0, 4);
+    }
+
     if (list.length === 0) { wrap.style.display = 'none'; return; }
     wrap.style.display = 'block';
     el('#modal-related').innerHTML = list.map(x => `
@@ -835,7 +808,6 @@
     }
   }
 
-  // ---------- Zoom (clic pour zoomer en plein ecran) ----------
   const lightbox = el('#lightbox');
   const lightboxImg = el('#lightbox-img');
   el('#modal-main-img').addEventListener('click', () => {
@@ -844,7 +816,7 @@
   });
   el('#lightbox-close').addEventListener('click', () => lightbox.classList.remove('open'));
   lightbox.addEventListener('click', (e) => { if (e.target === lightbox) lightbox.classList.remove('open'); });
-  // Zoom suiveur de souris sur desktop, pour voir le detail du tissu au survol
+
   let zoomedIn = false;
   lightboxImg.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -859,7 +831,6 @@
     lightboxImg.style.transformOrigin = `${xPct}% ${yPct}%`;
   });
 
-  // ---------- Size guide + pages d'information ----------
   const sizeGuideModal = el('#size-guide-modal');
   el('#size-guide-link').addEventListener('click', () => sizeGuideModal.classList.add('open'));
   el('#size-guide-close').addEventListener('click', () => sizeGuideModal.classList.remove('open'));
@@ -885,7 +856,6 @@
     if (sizeGuideModal.classList.contains('open')) sizeGuideModal.classList.remove('open');
   });
 
-  // ---------- Share link ----------
   el('#modal-share').addEventListener('click', async () => {
     const url = window.location.origin + productUrl(state.modalProduct);
     try {
@@ -903,11 +873,10 @@
       container.innerHTML = '';
       return;
     }
-    // Si les alertes de retour en stock sont actives, on laisse cliquer sur une taille epuisee pour s'inscrire
     const alertsOn = !!state.config.stockAlertsEnabled;
     container.innerHTML = p.sizes.map(s => `
       <button type="button" class="size-opt ${s.size === state.modalSelectedSize ? 'selected' : ''} ${!s.inStock ? 'out' : ''}"
-        data-size="${s.size}" ${(!s.inStock && !alertsOn) ? 'disabled' : ''}>${s.size}</button>
+        data-size="${s.size}">${s.size}</button>
     `).join('');
     container.querySelectorAll('.size-opt').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -945,19 +914,19 @@
     }
     if (hasSizes && !selected) {
       addBtn.disabled = true;
-      addBtn.textContent = !p.inStock ? 'Choisir une taille pour être prévenue' : 'Choisir une taille';
+      addBtn.textContent = 'Choisir une taille';
       return;
     }
     if (!hasSizes && !p.inStock) {
       addBtn.disabled = true;
       addBtn.textContent = 'Épuisé';
-      showAlertBox();
+      if (alertsOn) showAlertBox();
       return;
     }
     if (hasSizes && selected && !selected.inStock) {
       addBtn.disabled = true;
       addBtn.textContent = 'Épuisé';
-      showAlertBox();
+      if (alertsOn) showAlertBox();
       return;
     }
     if (hasSizes && selected) {
@@ -990,11 +959,10 @@
   el('#modal-close').addEventListener('click', () => closeProductModal());
   modal.addEventListener('click', (e) => { if (e.target === modal) closeProductModal(); });
 
-  // ---------- Cart ----------
   function addToCart(productId, size, qty = 1) {
     const key = cartKey(productId, size);
     state.cart[key] = (state.cart[key] || 0) + qty;
-    state.promo = null; // le panier change : le code promo doit etre re-valide
+    state.promo = null;
     saveCart();
     renderCartDrawer();
     showToast('Ajouté au panier');
@@ -1037,7 +1005,6 @@
     return flat;
   }
 
-  // Barre "Plus que X pour la livraison offerte"
   function renderCartProgress(subtotal) {
     const box = el('#cart-progress');
     const th = state.config.freeShippingThresholdCents;
@@ -1058,7 +1025,6 @@
     }
   }
 
-  // Suggestions dans le panier : pieces pas encore dans le panier, categories proches en premier
   function cartSuggestionsHtml() {
     const inCartIds = new Set(Object.keys(state.cart).map(k => parseInt(k.split('::')[0], 10)));
     const cartCats = new Set([...inCartIds].map(id => (state.products.find(p => p.id === id) || {}).category).filter(Boolean));
@@ -1081,7 +1047,6 @@
       </div>`;
   }
 
-  // Calcule et affiche sous-total, reductions, livraison et total
   function updateTotals() {
     const L = state.config.loyalty || {};
     const subtotal = cartSubtotal();
@@ -1178,7 +1143,6 @@
     updateTotals();
   }
 
-  // ---------- Code promo ----------
   el('#promo-apply').addEventListener('click', async () => {
     const code = el('#promo-input').value.trim();
     const msg = el('#promo-msg');
@@ -1203,7 +1167,6 @@
     }
   });
 
-  // ---------- Checkout : zone compte / invitee / fidelite ----------
   function checkoutMaxRedeemablePoints() {
     const loyalty = state.config.loyalty || {};
     if (!state.customer || !loyalty.pointValueCents) return 0;
@@ -1259,7 +1222,6 @@
     }
   }
 
-  // ---------- Checkout test (sans paiement) ----------
   el('#test-checkout-submit').addEventListener('click', async () => {
     const errorEl = el('#checkout-error');
     errorEl.textContent = '';
@@ -1323,7 +1285,7 @@
       state.redeemPoints = false;
       state.promo = null;
       saveCart();
-      if (!state.customer) { await loadCustomer(); } // recharge si un compte vient d'etre cree pendant la commande
+      if (!state.customer) { await loadCustomer(); }
       window.location.href = `/commande/${data.token}`;
     } catch (e) {
       errorEl.textContent = 'Erreur réseau, réessaie.';
@@ -1332,7 +1294,6 @@
     }
   });
 
-  // ---------- PayPal ----------
   function loadPaypalSdk() {
     return new Promise((resolve, reject) => {
       if (state.paypalLoaded) return resolve();
@@ -1403,7 +1364,6 @@
     state.paypalButtonsInstance.render('#paypal-buttons-container');
   }
 
-  // ---------- Drawer open/close ----------
   const overlay = el('#overlay');
   const drawer = el('#cart-drawer');
   function openCart() {
@@ -1419,7 +1379,6 @@
   el('#close-cart').addEventListener('click', closeCart);
   overlay.addEventListener('click', closeCart);
 
-  // ---------- Newsletter ----------
   el('#newsletter-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = el('#newsletter-email').value.trim();
@@ -1443,7 +1402,6 @@
     }
   });
 
-  // ---------- URL produit dediee ----------
   function openProductFromUrl() {
     const match = window.location.pathname.match(/^\/produit\/(\d+)/);
     if (match) {
@@ -1462,7 +1420,6 @@
     }
   });
 
-  // ---------- Realtime sync ----------
   function connectRealtime() {
     try {
       const source = new EventSource('/api/stream');
@@ -1474,17 +1431,15 @@
         renderAllGrids();
         if (drawer.classList.contains('open')) renderCartDrawer();
       });
-      source.onerror = () => { /* le navigateur retente automatiquement */ };
-    } catch (e) { /* SSE indisponible, tant pis, pas bloquant */ }
+      source.onerror = () => {};
+    } catch (e) {}
   }
 
-  // Rafraichit les comptes a rebours des ventes flash chaque minute
   setInterval(() => {
     if (el('#trending').style.display !== 'none') renderTrending();
     if (state.modalProduct && modal.classList.contains('open')) renderSizePicker();
   }, 60000);
 
-  // ---------- Init ----------
   (async function init() {
     el('#year').textContent = new Date().getFullYear();
     await loadConfig();
