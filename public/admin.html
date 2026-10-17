@@ -43,6 +43,8 @@
     <button class="admin-tab active" data-tab="dashboard" data-role="admin">Tableau de bord</button>
     <button class="admin-tab" data-tab="products" data-role="admin">Produits</button>
     <button class="admin-tab" data-tab="orders">Commandes</button>
+    <button class="admin-tab" data-tab="customers" data-role="admin">Clientes</button>
+    <button class="admin-tab" data-tab="promos" data-role="admin">Codes promo</button>
     <button class="admin-tab" data-tab="team" data-role="admin">Équipe</button>
     <button class="admin-tab" data-tab="settings" data-role="admin">Réglages</button>
   </div>
@@ -161,7 +163,72 @@
       <p class="hint" style="margin-top:14px;">Les points sont attribués et déduits automatiquement à chaque commande, selon le réglage de fidélité ci-dessous (onglet Réglages).</p>
     </div>
   </section>
-    <section id="tab-team" style="display:none;">
+
+  <section id="tab-promos" style="display:none;">
+    <div class="admin-layout">
+      <div class="panel">
+        <h3>Créer un code promo</h3>
+        <form id="promo-form">
+          <div class="field">
+            <label for="pm-code">Code (ex: BIENVENUE10)</label>
+            <input type="text" id="pm-code" required placeholder="BIENVENUE10" style="text-transform:uppercase;">
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="pm-type">Type</label>
+              <select id="pm-type">
+                <option value="percent">Pourcentage (%)</option>
+                <option value="fixed">Montant fixe (€)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="pm-value">Valeur</label>
+              <input type="number" id="pm-value" step="0.01" min="1" required placeholder="10">
+            </div>
+          </div>
+          <div class="field">
+            <label for="pm-min">Montant minimum d'achat (€) (optionnel)</label>
+            <input type="number" id="pm-min" step="0.01" min="0" placeholder="Ex: 50">
+          </div>
+          <div class="field">
+            <label for="pm-max-uses">Nombre max d'utilisations (optionnel)</label>
+            <input type="number" id="pm-max-uses" min="1" placeholder="Ex: 100">
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="pm-starts">Date de début (optionnel)</label>
+              <input type="datetime-local" id="pm-starts">
+            </div>
+            <div class="field">
+              <label for="pm-ends">Date d'expiration (optionnel)</label>
+              <input type="datetime-local" id="pm-ends">
+            </div>
+          </div>
+          <button type="submit" class="btn wine">Créer le code promo</button>
+          <p class="error-text" id="promo-error"></p>
+        </form>
+      </div>
+
+      <div class="panel">
+        <h3>Codes promo existants</h3>
+        <table class="product-table">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Réduction</th>
+              <th>Min. d'achat</th>
+              <th>Utilisations</th>
+              <th>Statut</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="promo-rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-team" style="display:none;">
     <div class="admin-layout">
       <div class="panel">
         <h3>Ajouter un employé</h3>
@@ -245,4 +312,3 @@
 <script src="/js/admin.js"></script>
 </body>
 </html>
-
