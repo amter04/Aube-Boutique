@@ -93,7 +93,14 @@
             <div id="size-grid" class="size-grid"></div>
           </div>
 
-          <div class="field promo-box">
+          <!-- Section Cross-Selling ("Complétez le look") -->
+          <div class="field" id="cross-selling-box" style="display:none; margin-top:16px; padding:12px; background:var(--paper-raised, #f7f5f0); border-radius:6px;">
+            <label style="font-weight:bold; margin-bottom:6px; display:block;">Complétez le look (pièces assorties)</label>
+            <p class="hint" style="margin-bottom:8px;">Sélectionnez les pièces suggérées sur la fiche produit :</p>
+            <div id="cross-selling-options" style="max-height:160px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
+          </div>
+
+          <div class="field promo-box" style="margin-top:16px;">
             <label class="check-line">
               <input type="checkbox" id="p-trending"> Mettre en avant dans « Tendances »
             </label>
@@ -118,7 +125,7 @@
           <div class="field" id="active-field" style="display:none;">
             <label class="check-line"><input type="checkbox" id="p-active"> Visible sur la boutique</label>
           </div>
-          <div style="display:flex; gap:10px;">
+          <div style="display:flex; gap:10px; margin-top:16px;">
             <button type="submit" class="btn wine" id="submit-btn">Ajouter</button>
             <button type="button" class="btn secondary" id="cancel-edit" style="display:none;">Annuler</button>
           </div>
