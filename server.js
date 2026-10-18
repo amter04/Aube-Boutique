@@ -3,27 +3,27 @@
  * AUBE — serveur de la boutique (version consolidée et sécurisée)
  *
  * ORGANISATION DU FICHIER
- *   0. Configuration et vérifications au démarrage
- *   1. Outils : erreurs, validation des saisies, limiteurs de tentatives
- *   2. Sécurité : en-têtes (CSP), contrôle d'origine, sessions en base
- *   3. Points d'extension : c'est ICI que se branchent les futures options
- *   4. Images, produits, commandes, fidélité, emails
- *   5. Routes (publiques, clientes, équipe, patron, paiement)
- *   6. Démarrage
+ *    0. Configuration et vérifications au démarrage
+ *    1. Outils : erreurs, validation des saisies, limiteurs de tentatives
+ *    2. Sécurité : en-têtes (CSP), contrôle d'origine, sessions en base
+ *    3. Points d'extension : c'est ICI que se branchent les futures options
+ *    4. Images, produits, commandes, fidélité, emails
+ *    5. Routes (publiques, clientes, équipe, patron, paiement)
+ *    6. Démarrage
  *
  * AJOUTER UNE OPTION SANS TOUCHER À CE FICHIER
- *   Crée un fichier  features/mon-option.js  qui exporte :
- *       module.exports = { register(ctx) { ... } };
- *   Le serveur le charge tout seul au démarrage. Dans register(ctx) tu peux :
- *     ctx.app.get/post(...)            ajouter des routes (avec ctx.requireAdmin / requireStaff)
- *     ctx.hooks.on('order.paid', fn)   réagir à un évènement (email, alerte...) APRÈS la commande
- *     ctx.hooks.tx('order.paid', fn)   agir DANS la transaction (ex : compter l'usage d'un code promo)
- *     ctx.pricing.add(fn)              ajouter une réduction au calcul du panier (code promo...)
- *     ctx.orderExtras.add(fn)          enregistrer une info en plus sur la commande (message cadeau...)
- *     ctx.publicConfig.add(fn)         annoncer l'option à la boutique via /api/config
- *     ctx.frontend.addScript(chemin)   charger un script boutique (/js/features/xxx.js)
- *   Évènements : order.created, order.paid, order.fulfillment, stock.changed, product.saved
- *   Tes données : range-les dans data.ext.<nom-de-ton-option> (jamais dans les champs du cœur).
+ *    Crée un fichier  features/mon-option.js  qui exporte :
+ *        module.exports = { register(ctx) { ... } };
+ *    Le serveur le charge tout seul au démarrage. Dans register(ctx) tu peux :
+ *      ctx.app.get/post(...)            ajouter des routes (avec ctx.requireAdmin / requireStaff)
+ *      ctx.hooks.on('order.paid', fn)    réagir à un évènement (email, alerte...) APRÈS la commande
+ *      ctx.hooks.tx('order.paid', fn)    agir DANS la transaction (ex : compter l'usage d'un code promo)
+ *      ctx.pricing.add(fn)              ajouter une réduction au calcul du panier (code promo...)
+ *      ctx.orderExtras.add(fn)          enregistrer une info en plus sur la commande (message cadeau...)
+ *      ctx.publicConfig.add(fn)          annoncer l'option à la boutique via /api/config
+ *      ctx.frontend.addScript(chemin)    charger un script boutique (/js/features/xxx.js)
+ *    Évènements : order.created, order.paid, order.fulfillment, stock.changed, product.saved
+ *    Tes données : range-les dans data.ext.<nom-de-ton-option> (jamais dans les champs du cœur).
  */
 require('dotenv').config();
 const path = require('path');
@@ -52,14 +52,14 @@ const MAX_CART_LINES = 30;
 const MAX_QTY_PER_LINE = 20;
 const STAFF_SESSION_MS = 8 * 60 * 60 * 1000;          // patron / employé : 8 h
 const CUSTOMER_SESSION_MS = 30 * 24 * 60 * 60 * 1000; // cliente : 30 jours
-const STAFF_CHECK_TTL_MS = 15 * 1000;                 // un employé désactivé perd l'accès en 15 s au plus
+const STAFF_CHECK_TTL_MS = 15 * 1000;                  // un employé désactivé perd l'accès en 15 s au plus
 const PASSWORD_MIN = 8;
 const PASSWORD_MAX = 200;
 
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
-// Si SESSION_SECRET est absent ou trop court, on en génère un au hasard (jamais de secret par défaut connu).
+// Si SESSION_SECRET est absent ou trop court, on en génère un au hasard.
 let SESSION_SECRET = process.env.SESSION_SECRET;
 if (!SESSION_SECRET || SESSION_SECRET.length < 16) {
   SESSION_SECRET = crypto.randomBytes(32).toString('hex');
@@ -116,7 +116,6 @@ function checkPassword(pw) {
   return s;
 }
 const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-// Une cellule CSV qui commence par = + - @ serait exécutée comme une formule par Excel
 function csvCell(v) {
   let s = String(v == null ? '' : v);
   if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
@@ -128,7 +127,6 @@ function audit(event, req, extra) {
 }
 
 // ----- Limiteurs -----
-// attempt : ne compte que les ÉCHECS (une cliente qui se connecte bien n'est jamais bloquée)
 function createAttemptLimiter({ name, max, windowMs }) {
   const hits = new Map();
   setInterval(() => { const now = Date.now(); for (const [k, v] of hits) if (v.resetAt <= now) hits.delete(k); }, 5 * 60 * 1000).unref();
@@ -152,7 +150,6 @@ function createAttemptLimiter({ name, max, windowMs }) {
   };
 }
 
-// request : compte chaque requête (inscriptions, commandes, consultations...)
 function createRequestLimiter({ name, max, windowMs }) {
   const hits = new Map();
   setInterval(() => { const now = Date.now(); for (const [k, v] of hits) if (v.resetAt <= now) hits.delete(k); }, 5 * 60 * 1000).unref();
@@ -181,7 +178,6 @@ const checkoutLimiter = createRequestLimiter({ name: 'checkout', max: 15, window
 const paypalLimiter = createRequestLimiter({ name: 'paypal', max: 40, windowMs: 60 * 60 * 1000 });
 const tokenLookupLimiter = createRequestLimiter({ name: 'token-lookup', max: 40, windowMs: 10 * 60 * 1000 });
 
-// Faux hash pour que "compte inconnu" et "mauvais mot de passe" prennent le même temps
 const DUMMY_HASH = store.hashPassword('aube-faux-mot-de-passe-pour-le-timing');
 
 // ======================================================================
@@ -189,9 +185,8 @@ const DUMMY_HASH = store.hashPassword('aube-faux-mot-de-passe-pour-le-timing');
 // ======================================================================
 const app = express();
 app.disable('x-powered-by');
-app.set('trust proxy', 1); // derrière le proxy de Render : req.ip et HTTPS corrects
+app.set('trust proxy', 1);
 
-// CSP : seuls nos scripts et ceux de PayPal peuvent s'exécuter (bloque l'injection de scripts)
 const CSP = [
   "default-src 'self'",
   "script-src 'self' https://*.paypal.com https://*.paypalobjects.com",
@@ -205,7 +200,6 @@ const CSP = [
   "object-src 'none'",
   "frame-ancestors 'none'"
 ].join('; ');
-// CSP_MODE=report-only (ne bloque rien, signale seulement) ou off (désactivée) si un souci apparaît
 const CSP_MODE = (process.env.CSP_MODE || 'enforce').toLowerCase();
 
 function securityHeaders(req, res, next) {
@@ -218,7 +212,6 @@ function securityHeaders(req, res, next) {
   else if (CSP_MODE !== 'off') res.setHeader('Content-Security-Policy', CSP);
   if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
   if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
-  // Pages privées : pas d'indexation, et le lien (qui contient le code de commande) n'est jamais transmis à un tiers
   if (req.path === '/admin' || req.path.startsWith('/equipe') || req.path === '/admin.html' || req.path.startsWith('/commande/')) {
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -226,11 +219,10 @@ function securityHeaders(req, res, next) {
   next();
 }
 
-// Refuse toute écriture venant d'un autre site (protection CSRF en plus du cookie SameSite)
 function sameOriginGuard(req, res, next) {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
   const source = req.get('origin') || req.get('referer');
-  if (!source) return next(); // outils sans navigateur : ils n'ont pas de cookie de session
+  if (!source) return next();
   try {
     if (new URL(source).host !== req.get('host')) return next(new HttpError(403, 'Origine non autorisée'));
   } catch (e) {
@@ -245,7 +237,7 @@ app.use(sameOriginGuard);
 app.use(express.static(path.join(__dirname, 'public'), { dotfiles: 'ignore' }));
 app.use('/uploads', express.static(uploadsDir, { dotfiles: 'deny', index: false }));
 
-// ----- Sessions stockées dans la base (elles survivent aux redémarrages) -----
+// ----- Sessions stockées dans la base -----
 class PgSessionStore extends session.Store {
   constructor(db) {
     super();
@@ -256,7 +248,6 @@ class PgSessionStore extends session.Store {
   async init() {
     await this.db.query('create table if not exists aube_sessions (sid text primary key, sess jsonb not null, expire timestamptz not null)');
     await this.db.query('create index if not exists aube_sessions_expire_idx on aube_sessions (expire)');
-    // Verrouille la table pour l'API publique de Supabase (seul le serveur y accède)
     await this.db.query('alter table aube_sessions enable row level security');
   }
   get(sid, cb) {
@@ -302,7 +293,6 @@ function destroySession(req, res) {
   });
 }
 
-// Nouvelle session à chaque connexion (empêche la fixation de session). On garde les autres identités du navigateur.
 function establishSession(req, values, maxAgeMs) {
   return new Promise((resolve, reject) => {
     const prev = req.session ? { role: req.session.role, employeeId: req.session.employeeId, roleSince: req.session.roleSince, customerId: req.session.customerId } : {};
@@ -316,7 +306,6 @@ function establishSession(req, values, maxAgeMs) {
   });
 }
 
-// ----- Qui est connecté ? (l'accès d'un employé est revérifié en base, pas seulement dans le cookie) -----
 const staffCache = new Map();
 async function employeeStatus(id) {
   const hit = staffCache.get(id);
@@ -360,7 +349,7 @@ function requireCustomer(req, res, next) {
 }
 
 // ======================================================================
-// 3. POINTS D'EXTENSION (futures options)
+// 3. POINTS D'EXTENSION
 // ======================================================================
 const eventHandlers = {};
 const txHandlers = {};
@@ -372,11 +361,9 @@ const frontendScripts = [];
 const hooks = {
   on(evt, fn) { (eventHandlers[evt] = eventHandlers[evt] || []).push(fn); },
   tx(evt, fn) { (txHandlers[evt] = txHandlers[evt] || []).push(fn); },
-  // après la transaction : une option qui plante ne gêne jamais la boutique
   emit(evt, payload) {
     (eventHandlers[evt] || []).forEach(fn => Promise.resolve().then(() => fn(payload)).catch(e => console.error(`[option ${evt}]`, e.message)));
   },
-  // dans la transaction : annulée seulement si l'option lève une HttpError volontaire
   async runTx(evt, data, payload) {
     for (const fn of (txHandlers[evt] || [])) {
       try { await fn(data, payload); } catch (e) { if (e instanceof HttpError) throw e; console.error(`[option tx ${evt}]`, e.message); }
@@ -411,7 +398,7 @@ async function buildOrderExtras(body, data) {
 }
 
 // ======================================================================
-// 4. DOMAINE : temps réel, images, produits, commandes, fidélité, emails
+// 4. DOMAINE
 // ======================================================================
 const MAX_SSE_CLIENTS = 300;
 const sseClients = new Set();
@@ -444,7 +431,6 @@ function uploadImages(req, res, next) {
   });
 }
 
-// On vérifie le contenu réel du fichier (pas seulement le type annoncé par le navigateur)
 function detectImageType(buf) {
   if (!buf || buf.length < 12) return null;
   if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return 'jpg';
@@ -463,7 +449,7 @@ async function saveProcessedImage(fileBuffer) {
   if (sharp) {
     try {
       processed = await sharp(fileBuffer, { limitInputPixels: 40e6 })
-        .rotate() // respecte l'orientation des photos de téléphone
+        .rotate()
         .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
         .jpeg({ quality: 82, mozjpeg: true })
         .toBuffer();
@@ -500,7 +486,6 @@ function toPublicProduct(p) {
     badges: p.badges || [], flashEndsAt: p.flashEndsAt || null,
     sizes: (p.sizes || []).map(s => ({ size: s.size, stock: s.stock, inStock: s.stock > 0 })),
     inStock: stock > 0, stock, createdAt: p.createdAt,
-    // champs ajoutés par les options (ex : featured, preorderNote), rangés dans p.ext
     ...(p.ext && p.ext.public ? p.ext.public : {})
   };
 }
@@ -575,7 +560,6 @@ function toAdminOrder(o) {
   };
 }
 
-// Ce que voit la cliente (page de confirmation, "Mon compte") : rien d'interne (employés, identifiants PayPal...)
 function toPublicOrder(o) {
   return {
     id: o.id, token: o.token, source: o.source || 'paypal', status: o.status,
@@ -609,7 +593,6 @@ function normalizeCart(items) {
   return [...merged.values()];
 }
 
-// Recalcule tout côté serveur : on ne fait jamais confiance aux prix envoyés par le navigateur
 function buildOrderFromCart(data, cart) {
   let subtotalCents = 0;
   const orderItems = [];
@@ -652,7 +635,6 @@ function computeLoyaltyEarnings(cents, loyalty) {
   return Math.max(0, Math.floor((cents / 100) * (loyalty.pointsPerEuro || 0)));
 }
 
-// Prix complet d'une commande : produits + livraison + réductions des options + points de fidélité
 async function priceOrder(data, { cart, account, redeemPoints, body }) {
   const built = buildOrderFromCart(data, cart);
   const adjustments = await runPricing(data, { cart: built.orderItems, subtotalCents: built.subtotalCents, account, body });
@@ -725,7 +707,6 @@ function sendConfirmationEmail(order, email) {
   });
 }
 
-// Paiement réel actif ? (clé PayPal complète ET activé dans les réglages du patron)
 function paymentsLive(data) {
   return !!process.env.PAYPAL_CLIENT_ID && !!process.env.PAYPAL_CLIENT_SECRET && !!data.settings.paymentsEnabled;
 }
@@ -791,7 +772,6 @@ function mountRoutes() {
     req.on('close', () => sseClients.delete(res));
   });
 
-  // Page de confirmation : accessible uniquement avec le code secret de la commande
   app.get('/api/orders/token/:token', tokenLookupLimiter, asyncHandler(async (req, res) => {
     if (!/^[A-Za-z0-9]{16,64}$/.test(req.params.token)) throw new HttpError(404, 'Commande introuvable');
     const data = await store.load();
@@ -884,7 +864,7 @@ function mountRoutes() {
       if (newPassword) e.passwordHash = store.hashPassword(newPassword);
       return e;
     });
-    invalidateStaff(id); // effet immédiat : un compte désactivé est coupé tout de suite
+    invalidateStaff(id);
     audit('employee.updated', req, { employeeId: id });
     res.json(toPublicEmployee(employee));
   }));
@@ -919,7 +899,11 @@ function mountRoutes() {
     customerLoginMailLimiter.check(req, email.toLowerCase());
     const data = await store.load();
     const customer = findCustomerByEmail(data, email);
-    const ok = store.verifyPassword(password, customer ? customer.passwordHash : DUMMY_HASH) && !!customer;
+    
+    // Supporte à la fois customer.passwordHash et customer.password
+    const pwdHash = customer ? (customer.passwordHash || customer.password) : DUMMY_HASH;
+    const ok = store.verifyPassword(password, pwdHash) && !!customer;
+
     if (!ok) {
       customerLoginIpLimiter.fail(req);
       customerLoginMailLimiter.fail(req, email.toLowerCase());
@@ -1040,7 +1024,6 @@ function mountRoutes() {
   app.put('/api/admin/products/:id', requireAdmin, uploadImages, asyncHandler(async (req, res) => {
     const productId = parseId(req.params.id);
     const b = req.body || {};
-    // Validation AVANT d'enregistrer quoi que ce soit
     const patch = {};
     if (b.name !== undefined) { patch.name = clean(b.name, 120); if (!patch.name) throw new HttpError(400, 'Nom requis'); }
     if (b.description !== undefined) patch.description = cleanText(b.description, 3000);
@@ -1063,7 +1046,6 @@ function mountRoutes() {
       const existing = data.products.find(p => p.id === productId);
       if (!existing) throw new HttpError(404, 'Produit introuvable');
       Object.assign(existing, patch);
-      // On ne conserve que des photos DÉJÀ rattachées à cette pièce (aucune adresse arbitraire)
       const current = productImages(existing);
       const kept = keep === null ? current : keep.filter(u => current.includes(u));
       existing.images = [...kept, ...newImages].slice(0, MAX_IMAGES_PER_PRODUCT);
@@ -1075,7 +1057,6 @@ function mountRoutes() {
     res.json({ ok: true });
   }));
 
-  // Réassort : les employés ne modifient QUE les quantités des tailles existantes
   app.patch('/api/admin/products/:id/stock', requireStaff, asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
     const updates = req.body && req.body.sizes;
@@ -1175,7 +1156,7 @@ function mountRoutes() {
     res.send('\uFEFF' + lines.join('\r\n'));
   }));
 
-  // ----- Commande SANS paiement : uniquement tant que les paiements réels ne sont pas activés -----
+  // ----- Commande SANS paiement -----
   app.post('/api/checkout/test', checkoutLimiter, asyncHandler(async (req, res) => {
     const body = req.body || {};
     const customerInfo = sanitizeCustomerInfo(body.customer);
@@ -1289,7 +1270,6 @@ function mountRoutes() {
     const orderId = String(req.params.orderId || '');
     if (!/^[A-Za-z0-9_-]{5,64}$/.test(orderId)) throw new HttpError(400, 'Commande invalide');
 
-    // On ne capture que les commandes que NOUS avons créées et qui attendent leur paiement
     const readData = await store.load();
     const pending = readData.orders.find(o => o.paypalOrderId === orderId);
     if (!pending) throw new HttpError(404, 'Commande introuvable');
@@ -1314,14 +1294,12 @@ function mountRoutes() {
       if (!order) return null;
       if (order.status === 'paid') return { order, newlyPaid: false };
 
-      // Le montant réellement encaissé doit correspondre EXACTEMENT à ce que nous avons demandé
       const paidCents = cap ? Math.round(parseFloat(cap.amount && cap.amount.value) * 100) : NaN;
       const amountOk = completed && paidCents === order.totalCents && cap.amount.currency_code === CURRENCY;
       order.payerName = clean(payerName, 100);
       order.payerEmail = validEmail(payer.email_address) || '';
       order.paypalCaptureId = cap ? cap.id : null;
 
-      // Adresse de livraison choisie dans PayPal
       const ship = unit.shipping;
       if (ship && ship.address) {
         const a = ship.address;
@@ -1372,7 +1350,7 @@ function mountRoutes() {
   app.all('/api/*', (req, res) => res.status(404).json({ error: 'Introuvable' }));
   app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-  // ----- Erreurs : jamais de détail technique côté navigateur -----
+  // ----- Erreurs -----
   app.use((err, req, res, next) => {
     if (res.headersSent) return next(err);
     let status = 500;
