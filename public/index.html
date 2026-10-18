@@ -9,7 +9,7 @@
 </head>
 <body>
 
-<!-- Bandeau d'annonces (messages qui défilent, remplis par app.js) -->
+<!-- Bandeau d'annonces -->
 <div class="announce-bar" id="announce-bar" style="display:none;">
   <div class="announce-text" id="announce-text"></div>
 </div>
@@ -60,7 +60,7 @@
 </section>
 
 <main>
-  <!-- Teaser de la prochaine collection (affiché seulement si une date est fournie par le serveur) -->
+  <!-- Teaser prochaine collection -->
   <section class="section next-drop" id="next-drop" style="display:none;">
     <div class="wrap">
       <p class="kicker">Prochaine collection</p>
@@ -75,7 +75,7 @@
     </div>
   </section>
 
-  <!-- Coups de cœur de la boutique (pièces marquées "featured" côté serveur) -->
+  <!-- Coups de cœur -->
   <section class="section" id="featured" style="display:none;">
     <div class="wrap">
       <div class="section-head">
@@ -96,7 +96,7 @@
     </div>
   </section>
 
-  <!-- Explorez nos univers : une tuile par catégorie -->
+  <!-- Universes -->
   <section class="section" id="universes" style="display:none;">
     <div class="wrap">
       <div class="section-head">
@@ -106,6 +106,7 @@
     </div>
   </section>
 
+  <!-- La Collection -->
   <section class="section" id="collection">
     <div class="wrap">
       <div class="section-head">
@@ -122,56 +123,12 @@
         </select>
       </div>
       <div class="grid" id="product-grid">
-        <!-- Rempli par app.js -->
-        <!-- Section Avis Clients -->
-<section id="product-reviews-section" class="reviews-container">
-  <h3>Avis clients vérifiés</h3>
-
-  <!-- Résumé des notes -->
-  <div id="reviews-summary" class="reviews-summary">
-    <span id="average-rating-stars" class="stars-display">⭐⭐⭐⭐⭐</span>
-    <span id="average-rating-score" class="rating-score">0 / 5</span>
-    <span id="total-reviews-count" class="reviews-count">(0 avis)</span>
-  </div>
-
-  <!-- Formulaire de dépôt d'avis (pour les clientes connectées) -->
-  <form id="review-form" class="review-form" enctype="multipart/form-data">
-    <h4>Laisser un avis vérifié</h4>
-    
-    <div class="form-group">
-      <label for="review-rating">Note :</label>
-      <select id="review-rating" name="rating" required>
-        <option value="5">⭐⭐⭐⭐⭐ — Excellent (5/5)</option>
-        <option value="4">⭐⭐⭐⭐ — Très bon (4/5)</option>
-        <option value="3">⭐⭐⭐ — Moyen (3/5)</option>
-        <option value="2">⭐⭐ — Décevant (2/5)</option>
-        <option value="1">⭐ — Très décevant (1/5)</option>
-      </select>
-    </div>
-
-    <div class="form-group">
-      <label for="review-comment">Ton commentaire :</label>
-      <textarea id="review-comment" name="comment" minlength="5" maxlength="1000" placeholder="Taille, coupe, matière, rendu porté..." required></textarea>
-    </div>
-
-    <div class="form-group">
-      <label for="review-image">Photo de la pièce portée (optionnel) :</label>
-      <input type="file" id="review-image" name="image" accept="image/jpeg,image/png,image/webp">
-    </div>
-
-    <button type="submit" class="btn-submit-review">Publier mon avis</button>
-  </form>
-
-  <!-- Liste des avis approuvés -->
-  <div id="reviews-list" class="reviews-list">
-    <!-- Les avis seront injectés ici en JS -->
-  </div>
-</section>
+        <!-- Rempli dynamiquement par app.js -->
       </div>
     </div>
   </section>
 
-  <!-- Avis clientes (affichés seulement si le serveur en fournit) -->
+  <!-- Avis globales (si fournies par le serveur) -->
   <section class="section" id="reviews" style="display:none;">
     <div class="wrap">
       <div class="section-head">
@@ -231,11 +188,9 @@
     <h3>Votre panier</h3>
     <button class="icon-btn" id="close-cart">&times;</button>
   </div>
-  <!-- Barre de progression vers la livraison offerte -->
   <div class="cart-progress" id="cart-progress" style="display:none;"></div>
   <div class="drawer-body" id="cart-items"></div>
   <div class="drawer-foot" id="cart-foot">
-    <!-- Code promo (affiché seulement si le serveur l'active) -->
     <div class="promo-box" id="promo-box" style="display:none;">
       <div class="promo-row">
         <input type="text" id="promo-input" placeholder="Code promo" autocomplete="off">
@@ -253,7 +208,6 @@
     <div id="checkout-area">
       <div id="test-checkout-form" style="display:none;">
         <p class="test-mode-note">🧪 Mode test — aucun paiement réel n'est demandé pour l'instant. La commande est enregistrée normalement pour que tu puisses tester le tunnel d'achat.</p>
-
         <div id="checkout-account-box" class="account-box" style="display:none;"></div>
 
         <div id="checkout-guest-fields">
@@ -276,7 +230,6 @@
           <div class="field"><label for="cf-city">Ville</label><input type="text" id="cf-city"></div>
         </div>
 
-        <!-- Message cadeau (affiché seulement si le serveur l'active) -->
         <div class="gift-box" id="gift-box" style="display:none;">
           <label class="check-line">
             <input type="checkbox" id="cf-gift"> C'est un cadeau
@@ -318,7 +271,7 @@
   <div class="drawer-body" id="account-body"></div>
 </aside>
 
-<!-- Auth modal (connexion / creation de compte) -->
+<!-- Auth modal -->
 <div class="modal" id="auth-modal">
   <div class="modal-card auth-card">
     <div class="modal-info" style="grid-column:1/-1;">
@@ -345,7 +298,7 @@
   </div>
 </div>
 
-<!-- Product detail modal -->
+<!-- Product detail modal (avec section avis intégrée) -->
 <div class="modal" id="product-modal">
   <div class="modal-card">
     <div class="modal-media">
@@ -367,7 +320,6 @@
       <button type="button" class="size-guide-link" id="size-guide-link">Guide des tailles</button>
       <p class="stock-note" id="modal-stock-note"></p>
 
-      <!-- Alerte "me prévenir du retour en stock" (affichée seulement si le serveur l'active) -->
       <div class="stock-alert" id="modal-alert" style="display:none;">
         <p>Cette taille est épuisée. Laisse ton email, on te prévient dès son retour.</p>
         <div class="alert-row">
@@ -385,6 +337,46 @@
         <h4>Vous aimerez aussi</h4>
         <div class="related-grid" id="modal-related"></div>
       </div>
+
+      <!-- Section Avis Clients VÉRIFIÉS (placée ici, sous le produit) -->
+      <section id="product-reviews-section" class="reviews-container" style="margin-top: 24px; border-top: 1px solid #eee; padding-top: 16px;">
+        <h3>Avis clients vérifiés</h3>
+
+        <div id="reviews-summary" class="reviews-summary">
+          <span id="average-rating-stars" class="stars-display">⭐⭐⭐⭐⭐</span>
+          <span id="average-rating-score" class="rating-score">0 / 5</span>
+          <span id="total-reviews-count" class="reviews-count">(0 avis)</span>
+        </div>
+
+        <form id="review-form" class="review-form" enctype="multipart/form-data">
+          <h4>Laisser un avis vérifié</h4>
+          
+          <div class="field">
+            <label for="review-rating">Note :</label>
+            <select id="review-rating" name="rating" required>
+              <option value="5">⭐⭐⭐⭐⭐ — Excellent (5/5)</option>
+              <option value="4">⭐⭐⭐⭐ — Très bon (4/5)</option>
+              <option value="3">⭐⭐⭐ — Moyen (3/5)</option>
+              <option value="2">⭐⭐ — Décevant (2/5)</option>
+              <option value="1">⭐ — Très décevant (1/5)</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="review-comment">Ton commentaire :</label>
+            <textarea id="review-comment" name="comment" minlength="5" maxlength="1000" placeholder="Taille, coupe, matière, rendu porté..." required></textarea>
+          </div>
+
+          <div class="field">
+            <label for="review-image">Photo de la pièce portée (optionnel) :</label>
+            <input type="file" id="review-image" name="image" accept="image/jpeg,image/png,image/webp">
+          </div>
+
+          <button type="submit" class="btn wine" style="margin-top:8px;">Publier mon avis</button>
+        </form>
+
+        <div id="reviews-list" class="reviews-list" style="margin-top:16px;"></div>
+      </section>
     </div>
   </div>
 </div>
@@ -427,7 +419,7 @@
   </div>
 </div>
 
-<!-- Pages d'information (livraison, retours, fidélité, légal...) -->
+<!-- Pages d'information -->
 <div class="modal" id="info-modal">
   <div class="modal-card size-guide-card">
     <div class="modal-info" style="grid-column:1/-1;">
