@@ -10,20 +10,6 @@
  *    4. Images, produits, commandes, fidélité, emails
  *    5. Routes (publiques, clientes, équipe, patron, paiement)
  *    6. Démarrage
- *
- * AJOUTER UNE OPTION SANS TOUCHER À CE FICHIER
- *    Crée un fichier  features/mon-option.js  qui exporte :
- *        module.exports = { register(ctx) { ... } };
- *    Le serveur le charge tout seul au démarrage. Dans register(ctx) tu peux :
- *      ctx.app.get/post(...)            ajouter des routes (avec ctx.requireAdmin / requireStaff)
- *      ctx.hooks.on('order.paid', fn)    réagir à un évènement (email, alerte...) APRÈS la commande
- *      ctx.hooks.tx('order.paid', fn)    agir DANS la transaction (ex : compter l'usage d'un code promo)
- *      ctx.pricing.add(fn)              ajouter une réduction au calcul du panier (code promo...)
- *      ctx.orderExtras.add(fn)          enregistrer une info en plus sur la commande (message cadeau...)
- *      ctx.publicConfig.add(fn)          annoncer l'option à la boutique via /api/config
- *      ctx.frontend.addScript(chemin)    charger un script boutique (/js/features/xxx.js)
- *    Évènements : order.created, order.paid, order.fulfillment, stock.changed, product.saved
- *    Tes données : range-les dans data.ext.<nom-de-ton-option> (jamais dans les champs du cœur).
  */
 require('dotenv').config();
 const path = require('path');
@@ -59,7 +45,6 @@ const PASSWORD_MAX = 200;
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
-// Si SESSION_SECRET est absent ou trop court, on en génère un au hasard.
 let SESSION_SECRET = process.env.SESSION_SECRET;
 if (!SESSION_SECRET || SESSION_SECRET.length < 16) {
   SESSION_SECRET = crypto.randomBytes(32).toString('hex');
@@ -654,14 +639,23 @@ function findCustomerByEmail(data, email) {
   const norm = store.normalizeEmail(email);
   return data.customers.find(c => store.normalizeEmail(c.email) === norm);
 }
+
 function createCustomer(data, { name, email, password }) {
+  const confirmToken = secureToken(32);
   const customer = {
-    id: data.nextCustomerId++, name, email: store.normalizeEmail(email),
-    passwordHash: store.hashPassword(password), points: 0, createdAt: new Date().toISOString()
+    id: data.nextCustomerId++,
+    name,
+    email: store.normalizeEmail(email),
+    passwordHash: store.hashPassword(password),
+    confirmed: false, // Bloqué tant que non confirmé par email
+    confirmToken,
+    points: 0,
+    createdAt: new Date().toISOString()
   };
   data.customers.push(customer);
   return customer;
 }
+
 function sanitizeCustomerInfo(c) {
   if (!c || typeof c !== 'object') throw new HttpError(400, 'Nom et email requis');
   const name = clean(c.name, 100);
@@ -887,8 +881,11 @@ function mountRoutes() {
       if (findCustomerByEmail(data, email)) throw new HttpError(409, 'Un compte existe deja avec cet email');
       return createCustomer(data, { name, email, password });
     });
-    await establishSession(req, { customerId: customer.id }, CUSTOMER_SESSION_MS);
-    res.status(201).json({ ok: true, customer: toPublicCustomer(customer) });
+
+    // Émet l'événement pour envoyer l'email de confirmation via le module
+    hooks.emit('customer.created', { customer });
+
+    res.status(201).json({ ok: true, message: 'Compte créé ! Veuillez vérifier votre boîte mail pour confirmer votre inscription.' });
   }));
 
   app.post('/api/auth/login', asyncHandler(async (req, res) => {
@@ -899,8 +896,8 @@ function mountRoutes() {
     customerLoginMailLimiter.check(req, email.toLowerCase());
     const data = await store.load();
     const customer = findCustomerByEmail(data, email);
-    
-    // Supporte à la fois customer.passwordHash et customer.password
+
+    // Supporte passwordHash et password
     const pwdHash = customer ? (customer.passwordHash || customer.password) : DUMMY_HASH;
     const ok = store.verifyPassword(password, pwdHash) && !!customer;
 
@@ -909,6 +906,12 @@ function mountRoutes() {
       customerLoginMailLimiter.fail(req, email.toLowerCase());
       throw new HttpError(401, 'Email ou mot de passe incorrect');
     }
+
+    // Blocage si le compte n'a pas encore été confirmé
+    if (customer.confirmed === false) {
+      throw new HttpError(403, 'Merci de confirmer votre adresse email en cliquant sur le lien reçu par mail.');
+    }
+
     customerLoginMailLimiter.reset(req, email.toLowerCase());
     await establishSession(req, { customerId: customer.id }, CUSTOMER_SESSION_MS);
     res.json({ ok: true, customer: toPublicCustomer(customer) });
