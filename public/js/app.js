@@ -1409,6 +1409,80 @@
       if (state.products.some(p => p.id === id)) openProductModal(id, false);
     }
   }
+  // Render des étoiles
+function renderStars(rating) {
+  const full = Math.round(rating);
+  return '★'.repeat(full) + '☆'.repeat(5 - full);
+}
+
+// 1. Charger et afficher les avis d'un produit
+async function loadProductReviews(productId) {
+  const summaryEl = document.getElementById('reviews-summary');
+  const listEl = document.getElementById('reviews-list');
+
+  try {
+    const res = await fetch(`/api/products/${productId}/reviews`);
+    if (!res.ok) throw new Error('Impossible de charger les avis');
+    
+    const data = await res.json();
+
+    // Mise à jour du résumé
+    document.getElementById('average-rating-stars').textContent = renderStars(data.averageRating);
+    document.getElementById('average-rating-score').textContent = `${data.averageRating} / 5`;
+    document.getElementById('total-reviews-count').textContent = `(${data.totalReviews} avis)`;
+
+    // Affichage des avis
+    if (data.reviews.length === 0) {
+      listEl.innerHTML = '<p class="no-reviews">Aucun avis pour le moment sur cette pièce.</p>';
+      return;
+    }
+
+    listEl.innerHTML = data.reviews.map(review => `
+      <div class="review-card">
+        <div class="review-header">
+          <strong>${escapeHtml(review.authorName)}</strong>
+          <span class="stars">${renderStars(review.rating)}</span>
+          <small>${new Date(review.createdAt).toLocaleDateString('fr-FR')}</small>
+        </div>
+        <p class="review-comment">${escapeHtml(review.comment)}</p>
+        ${review.imageUrl ? `
+          <div class="review-image">
+            <a href="${review.imageUrl}" target="_blank">
+              <img src="${review.imageUrl}" alt="Photo de ${escapeHtml(review.authorName)}" />
+            </a>
+          </div>
+        ` : ''}
+      </div>
+    `).join('');
+
+  } catch (err) {
+    console.error('Erreur chargement avis :', err);
+  }
+}
+
+// 2. Soumettre un nouvel avis
+document.getElementById('review-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  
+  const productId = getCurrentProductId(); // Récupère l'ID du produit affiché
+  const formData = new FormData(e.target);
+
+  try {
+    const res = await fetch(`/api/products/${productId}/reviews`, {
+      method: 'POST',
+      body: formData
+    });
+    
+    const result = await res.json();
+
+    if (!res.ok) throw new Error(result.error || 'Erreur lors de l\'envoi de l\'avis.');
+
+    alert(result.message);
+    e.target.reset();
+  } catch (err) {
+    alert(err.message);
+  }
+});
 
   window.addEventListener('popstate', () => {
     const match = window.location.pathname.match(/^\/produit\/(\d+)/);
@@ -1458,3 +1532,5 @@
     loadReviews();
   })();
 })();
+
+
