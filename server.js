@@ -99,6 +99,12 @@ function csvCell(v) {
   return `"${s.replace(/"/g, '""')}"`;
 }
 
+function parseColors(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.map(c => clean(c, 40)).filter(Boolean);
+  return String(raw).split(',').map(c => clean(c, 40)).filter(Boolean);
+}
+
 function audit(event, req, extra) {
   console.log(JSON.stringify({ t: new Date().toISOString(), event, ip: req && req.ip, ...(extra || {}) }));
 }
@@ -455,7 +461,7 @@ function toPublicProduct(p) {
   const stock = computeStock(p);
   const images = productImages(p);
   return {
-    id: p.id, slug: productSlug(p), name: p.name, description: p.description, category: p.category,
+    id: p.id, slug: productSlug(p), reference: p.reference || '', name: p.name, colors: p.colors || [], description: p.description, category: p.category,
     images, imageUrl: images[0] || '',
     price: p.priceCents / 100, finalPrice: finalPriceCents(p) / 100, discountPercent: p.discountPercent || 0,
     badges: p.badges || [], flashEndsAt: p.flashEndsAt || null,
@@ -467,7 +473,7 @@ function toPublicProduct(p) {
 
 function toAdminProduct(p) {
   return {
-    id: p.id, name: p.name, description: p.description, price: p.priceCents / 100, category: p.category,
+    id: p.id, reference: p.reference || '', name: p.name, colors: p.colors || [], description: p.description, price: p.priceCents / 100, category: p.category,
     images: productImages(p), sizes: p.sizes || [], stock: computeStock(p), badges: p.badges || [],
     discountPercent: p.discountPercent || 0, flashEndsAt: p.flashEndsAt || null, isActive: !!p.isActive
   };
@@ -1085,6 +1091,8 @@ function mountRoutes() {
   app.post('/api/admin/products', requireAdmin, uploadImages, asyncHandler(async (req, res) => {
     const name = clean(req.body.name, 120);
     if (!name) throw new HttpError(400, 'Nom requis');
+    const reference = clean(req.body.reference, 60);
+    const colors = parseColors(req.body.colors);
     const priceCents = parsePriceCents(req.body.price);
     const description = cleanText(req.body.description, 3000);
     const category = clean(req.body.category, 60);
@@ -1097,7 +1105,22 @@ function mountRoutes() {
     for (const file of (req.files || [])) images.push(await saveProcessedImage(file.buffer));
 
     const product = await store.withTransaction(async (data) => {
-      const p = { id: data.nextProductId++, name, description, priceCents, category, images, sizes, badges, discountPercent, flashEndsAt, isActive: true, createdAt: new Date().toISOString() };
+      const p = { 
+        id: data.nextProductId++, 
+        reference, 
+        name, 
+        colors, 
+        description, 
+        priceCents, 
+        category, 
+        images, 
+        sizes, 
+        badges, 
+        discountPercent, 
+        flashEndsAt, 
+        isActive: true, 
+        createdAt: new Date().toISOString() 
+      };
       data.products.push(p);
       return p;
     });
@@ -1110,7 +1133,9 @@ function mountRoutes() {
     const productId = parseId(req.params.id);
     const b = req.body || {};
     const patch = {};
+    if (b.reference !== undefined) patch.reference = clean(b.reference, 60);
     if (b.name !== undefined) { patch.name = clean(b.name, 120); if (!patch.name) throw new HttpError(400, 'Nom requis'); }
+    if (b.colors !== undefined) patch.colors = parseColors(b.colors);
     if (b.description !== undefined) patch.description = cleanText(b.description, 3000);
     if (b.price !== undefined) patch.priceCents = parsePriceCents(b.price);
     if (b.category !== undefined) patch.category = clean(b.category, 60);
