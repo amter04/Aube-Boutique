@@ -45,6 +45,7 @@
     <button class="admin-tab" data-tab="orders">Commandes</button>
     <button class="admin-tab" data-tab="customers" data-role="admin">Clientes</button>
     <button class="admin-tab" data-tab="promos" data-role="admin">Codes promo</button>
+    <button class="admin-tab" data-tab="reviews" data-role="admin">Avis clients</button>
     <button class="admin-tab" data-tab="team" data-role="admin">Équipe</button>
     <button class="admin-tab" data-tab="settings" data-role="admin">Réglages</button>
   </div>
@@ -231,6 +232,16 @@
           </thead>
           <tbody id="promo-rows"></tbody>
         </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section Modération des Avis Clients -->
+  <section id="tab-reviews" style="display:none;">
+    <div class="panel" style="max-width:820px;">
+      <h3 style="margin-bottom:18px;">Modération des avis clients</h3>
+      <div id="admin-reviews-list">
+        <p style="color:#918A80; padding:12px 0;">Chargement des avis...</p>
       </div>
     </div>
   </section>
