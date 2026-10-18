@@ -9,6 +9,7 @@
   let editingId = null;
   let existingImages = [];
   let newFiles = [];
+  let selectedCategoryFilter = 'ALL';
 
   function showToast(msg) {
     const t = el('#toast');
@@ -417,17 +418,37 @@
     }
   }
 
-  // ---------- Category select ----------
+  // ---------- Category Select & Filter ----------
   function refreshCategoryOptions(selected) {
     const select = el('#p-category');
+    const filterSelect = el('#filter-category');
     const cats = [...new Set(products.map(p => p.category).filter(Boolean))].sort();
+
+    // Remplissage du select du formulaire
     const current = selected !== undefined ? selected : select.value;
     select.innerHTML = `<option value="">Sans catégorie</option>` +
-      cats.map(c => `<option value="${c}">${c}</option>`).join('');
+      cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
     if (current && ![...select.options].some(o => o.value === current)) {
-      select.insertAdjacentHTML('beforeend', `<option value="${current}">${current}</option>`);
+      select.insertAdjacentHTML('beforeend', `<option value="${esc(current)}">${esc(current)}</option>`);
     }
     if (current) select.value = current;
+
+    // Remplissage du menu de filtre par catégorie
+    if (filterSelect) {
+      const prevFilter = selectedCategoryFilter;
+      filterSelect.innerHTML = `<option value="ALL">Toutes les catégories</option>` +
+        cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+      if (cats.includes(prevFilter)) filterSelect.value = prevFilter;
+      else filterSelect.value = 'ALL';
+    }
+  }
+
+  const filterCatSelect = el('#filter-category');
+  if (filterCatSelect) {
+    filterCatSelect.addEventListener('change', (e) => {
+      selectedCategoryFilter = e.target.value;
+      renderProductRows();
+    });
   }
 
   el('#new-cat-btn').addEventListener('click', () => {
@@ -436,7 +457,7 @@
     const trimmed = name.trim();
     const select = el('#p-category');
     if (![...select.options].some(o => o.value === trimmed)) {
-      select.insertAdjacentHTML('beforeend', `<option value="${trimmed}">${trimmed}</option>`);
+      select.insertAdjacentHTML('beforeend', `<option value="${esc(trimmed)}">${esc(trimmed)}</option>`);
     }
     select.value = trimmed;
   });
@@ -544,17 +565,32 @@
 
   function renderProductRows() {
     const tbody = el('#product-rows');
-    if (products.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="6" style="color:#918A80; padding:18px 10px;">Aucune pièce ajoutée pour le moment.</td></tr>`;
+    
+    // Filtrage par catégorie
+    let filtered = products;
+    if (selectedCategoryFilter !== 'ALL') {
+      filtered = products.filter(p => p.category === selectedCategoryFilter);
+    }
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" style="color:#918A80; padding:18px 10px;">Aucune pièce trouvée.</td></tr>`;
       return;
     }
-    tbody.innerHTML = products.map(p => {
+
+    tbody.innerHTML = filtered.map(p => {
       const badgeTags = (p.badges || []).map(b => `<span class="badge-tag ${b}">${BADGE_LABELS[b] || b}</span>`).join('');
       const thumb = (p.images && p.images[0]) || '';
+      const colorsStr = Array.isArray(p.colors) ? p.colors.join(', ') : (p.colors || '-');
+      
       return `
       <tr data-id="${p.id}">
         <td>${thumb ? `<img src="${thumb}" alt="">` : ''}</td>
-        <td>${esc(p.name)}${badgeTags ? `<div style="margin-top:4px;">${badgeTags}</div>` : ''}</td>
+        <td>
+          ${p.reference ? `<div style="font-size:11px; font-weight:bold; color:#d4a373; text-transform:uppercase;">${esc(p.reference)}</div>` : ''}
+          <strong>${esc(p.name)}</strong>
+          ${badgeTags ? `<div style="margin-top:2px;">${badgeTags}</div>` : ''}
+        </td>
+        <td style="font-size:12px; color:#555;">${esc(colorsStr)}</td>
         <td>${fmt(p.price)}${p.discountPercent ? ` <span style="color:#77706A;font-size:12px;">(-${p.discountPercent}%)</span>` : ''}</td>
         <td class="${p.stock === 0 ? 'stock-low' : ''}">${p.stock}</td>
         <td>${p.isActive ? 'En ligne' : 'Masqué'}</td>
@@ -583,7 +619,9 @@
     editingId = id;
     el('#form-title').textContent = 'Modifier la pièce';
     el('#product-id').value = id;
+    el('#p-ref').value = p.reference || '';
     el('#p-name').value = p.name;
+    el('#p-colors').value = Array.isArray(p.colors) ? p.colors.join(', ') : (p.colors || '');
     el('#p-desc').value = p.description || '';
     el('#p-price').value = p.price;
     refreshCategoryOptions(p.category || '');
@@ -620,6 +658,8 @@
     newFiles = [];
     el('#product-form').reset();
     el('#form-title').textContent = 'Ajouter une pièce';
+    el('#p-ref').value = '';
+    el('#p-colors').value = '';
     el('#submit-btn').textContent = 'Ajouter';
     el('#cancel-edit').style.display = 'none';
     el('#active-field').style.display = 'none';
@@ -644,7 +684,9 @@
     const { badges, discountPercent, flashEndsAt } = collectBadgesAndPromo();
 
     const formData = new FormData();
+    formData.append('reference', el('#p-ref').value.trim());
     formData.append('name', el('#p-name').value);
+    formData.append('colors', el('#p-colors').value.trim());
     formData.append('description', el('#p-desc').value);
     formData.append('price', el('#p-price').value);
     formData.append('category', el('#p-category').value);
