@@ -765,39 +765,56 @@ function mountRoutes() {
     res.json({ ok: true });
   }));
 
-  app.post('/api/staff/login', asyncHandler(async (req, res) => {
-    const email = validEmail(req.body && req.body.email);
-    const password = String((req.body && req.body.password) || '').slice(0, PASSWORD_MAX);
-    if (!email || !password) throw new HttpError(400, 'Email et mot de passe requis');
-    staffLoginIpLimiter.check(req);
-    staffLoginMailLimiter.check(req, email.toLowerCase());
+app.post('/api/staff/login', asyncHandler(async (req, res) => {
+  const email = validEmail(req.body && req.body.email);
+  const password = String((req.body && req.body.password) || '').slice(0, PASSWORD_MAX);
+  if (!email || !password) throw new HttpError(400, 'Email et mot de passe requis');
 
-    // 1. Authentification via Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    });
+  staffLoginIpLimiter.check(req);
+  staffLoginMailLimiter.check(req, email.toLowerCase());
 
-    if (authError) {
-      staffLoginIpLimiter.fail(req);
-      staffLoginMailLimiter.fail(req, email.toLowerCase());
-      audit('login.staff.fail', req, { email });
-      throw new HttpError(401, 'Identifiants incorrects');
+  const data = await store.load();
+  const employee = (data.employees || []).find(e => store.normalizeEmail(e.email) === store.normalizeEmail(email));
+
+  if (!employee || employee.active === false) {
+    staffLoginIpLimiter.fail(req);
+    staffLoginMailLimiter.fail(req, email.toLowerCase());
+    throw new HttpError(401, 'Identifiants incorrects ou compte désactivé');
+  }
+
+  let authenticated = false;
+
+  // 1. Essayer l'authentification Supabase Auth
+  try {
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+    if (!authError && authData.user) {
+      authenticated = true;
     }
+  } catch (err) {
+    console.warn('Supabase Auth indisponible pour staff login, bascule sur la vérification locale:', err.message);
+  }
 
-    // 2. Vérification du statut dans la table store
-    const data = await store.load();
-    const employee = (data.employees || []).find(e => store.normalizeEmail(e.email) === store.normalizeEmail(email));
-
-    if (!employee || employee.active === false) {
-      throw new HttpError(403, 'Accès refusé ou compte désactivé.');
+  // 2. Si Supabase échoue ou que le compte n'y est pas encore, vérifier via store.verifyPassword
+  if (!authenticated) {
+    const localHash = employee.passwordHash || DUMMY_HASH;
+    if (store.verifyPassword(password, localHash)) {
+      authenticated = true;
     }
+  }
 
-    staffLoginMailLimiter.reset(req, email.toLowerCase());
-    await establishSession(req, { role: 'employee', employeeId: employee.id, roleSince: Date.now() }, STAFF_SESSION_MS);
-    audit('login.staff.ok', req, { employeeId: employee.id });
-    res.json({ ok: true, employee: toPublicEmployee(employee) });
-  }));
+  if (!authenticated) {
+    staffLoginIpLimiter.fail(req);
+    staffLoginMailLimiter.fail(req, email.toLowerCase());
+    audit('login.staff.fail', req, { email });
+    throw new HttpError(401, 'Identifiants incorrects');
+  }
+
+  staffLoginMailLimiter.reset(req, email.toLowerCase());
+  await establishSession(req, { role: 'employee', employeeId: employee.id, roleSince: Date.now() }, STAFF_SESSION_MS);
+  audit('login.staff.ok', req, { employeeId: employee.id });
+
+  res.json({ ok: true, employee: toPublicEmployee(employee) });
+}));
 
   const logoutStaff = asyncHandler(async (req, res) => { await destroySession(req, res); res.json({ ok: true }); });
   app.post('/api/admin/logout', logoutStaff);
