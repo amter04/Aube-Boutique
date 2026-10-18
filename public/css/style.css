@@ -1,5 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Work+Sans:wght@400;500;600&display=swap');
-
+@import url('https://fonts.googleapis.com/css2?family=Young+Serif&family=Figtree:wght@400;500;600&display=swap');
 :root {
   --ink: #201A16;
   --paper: #EFEAE0;
@@ -1278,3 +1277,94 @@ img {
     max-width: 100%;
   }
 }
+
+/* ===================== THÈME TERRE ===================== */
+:root {
+  --ink: #1F3A2E; --paper: #F1F4EC; --paper-raised: #FFFFFF;
+  --wine: #C45A3A; --wine-dark: #A24528; --dust: #B9C7A8; --line: #DCE3D2;
+  --ok: #2F5A3A; --err: #B23A2A; --radius: 12px; --soft: #5E7568; --tint: #E4EBD9;
+}
+body { font-family: 'Figtree', sans-serif; }
+h1, h2, h3, .display, .logo, .footer-logo, .related h4, .tile-label, .countdown span,
+.account-hero .points-value, .card-media .placeholder {
+  font-family: 'Young Serif', serif; font-weight: 400; letter-spacing: 0;
+}
+.countdown small, .tile-label small, .footer-col h4 { font-family: 'Figtree', sans-serif; }
+
+/* Textes secondaires : gris-vert au lieu de gris-brun */
+.card-cat, .section-head .count, .hero-text .lede, .reassure-text, .hint, .stock-note,
+.footer-link, .footer-about, .site-footer, .review-author, .info-body, .checkout-note,
+.cart-item-info .price, .cart-item-info .size-label, .perks, .empty-state, .suggest-title,
+.related-price, .suggest-price, .mini-order .mo-date, .modal-info .desc,
+.account-hero .acc-email, .account-hero .points-label, .account-hero .points-worth { color: var(--soft); }
+
+/* En-tête */
+.site-header { background: var(--paper); border-bottom: 0; }
+.site-header .wrap { height: 84px; }
+.logo { font-size: 30px; }
+.main-nav > a, .dropdown-trigger { font-weight: 500; }
+.main-nav > a:hover { border-color: transparent; color: var(--wine); }
+.search-box input { border-radius: 999px; border: 0; background: #fff; padding: 11px 18px; }
+.icon-only-btn { border: 0; background: #fff; border-radius: 999px; color: var(--ink); padding: 11px 15px; }
+.icon-only-btn:hover { background: var(--ink); color: #fff; }
+.icon-only-btn.logged-in { color: var(--wine); }
+.cart-btn { border: 0; background: var(--ink); color: #fff; border-radius: 999px; padding: 12px 22px; font-weight: 600; }
+.cart-btn:hover { background: var(--wine); color: #fff; }
+.dropdown-panel { border: 0; border-radius: 18px; box-shadow: 0 12px 32px rgba(31,58,46,.14); padding: 10px; }
+.dropdown-panel button { border-radius: 10px; }
+
+/* Boutons */
+.btn { border-radius: 999px; padding: 14px 30px; font-weight: 600; }
+.btn:hover { opacity: 1; transform: translateY(-1px); }
+.btn.secondary { border: 2px solid var(--ink); padding: 12px 28px; }
+.btn.wine:hover { background: var(--wine-dark); border-color: var(--wine-dark); }
+
+/* Page d'accueil */
+.hero-text h1 { font-size: clamp(38px, 4.6vw, 56px); }
+.hero-media { border-radius: 160px 160px 24px 24px; }
+@media (min-width: 861px) {
+  .hero { max-width: var(--maxw); margin: 0 auto; padding: 24px 28px 56px; gap: 40px; border-bottom: 0; align-items: center; }
+  .hero-text { padding: 0; max-width: none; margin: 0; }
+  .hero-media { min-height: 460px; border-radius: 230px 230px 28px 28px; }
+}
+.reassurance { background: transparent; border-bottom: 0; }
+.reassure-item { background: #fff; border-radius: 18px; padding: 16px 18px; }
+.section-head { border-bottom: 0; padding-bottom: 8px; }
+.section-head h2 { font-size: 36px; }
+.filter-chip { background: #fff; border: 0; }
+.filter-chip.active, .filter-chip:hover { background: var(--ink); color: #fff; }
+.next-drop { background: var(--ink); }
+.tile { border: 0; border-radius: 24px; }
+
+/* Cartes produit */
+@media (min-width: 1001px) { .grid { grid-template-columns: repeat(4, 1fr); } }
+.card { background: #fff; border-radius: 24px; padding: 12px 12px 18px; transition: transform .2s ease, box-shadow .2s ease; }
+.card:hover { transform: translateY(-3px); box-shadow: 0 14px 30px rgba(31,58,46,.10); }
+.card-media { border: 0; border-radius: 16px; margin-bottom: 12px; }
+.card > :not(.card-media) { margin-left: 6px; margin-right: 6px; }
+.card-price, .price-now { color: var(--wine); font-weight: 600; }
+.price-strike { color: #9AAA9F; }
+.badge-new, .badge-discount { background: var(--wine); color: #fff; font-weight: 600; }
+.badge-out { background: #fff; border: 0; }
+.card-sizes .sz { border-radius: 8px; border-color: var(--line); }
+
+/* Pastilles chaudes (promo, mode test, fidélité...) : beige -> terracotta pâle */
+.badge-pill.promo, .test-mode-note, .loyalty-box, .preorder-note, .badge-preorder,
+.info-body .todo { background: #F6E3D3; color: #9A4A22; }
+.badge-pill.tendance { background: var(--tint); color: var(--ink); border-color: transparent; }
+
+/* Fiche produit, tiroirs, formulaires */
+.modal-card { border-radius: 28px; border: 0; }
+.modal-media img, .modal-main-img img { border-radius: 16px; }
+.size-opt { border-radius: 999px; background: #fff; }
+.size-opt.selected { background: var(--ink); color: #fff; }
+.drawer { border-left: 0; box-shadow: -16px 0 40px rgba(31,58,46,.12); }
+.cart-item img { border-radius: 10px; }
+.qty-row button { border-radius: 50%; }
+.progress-fill { background: var(--wine); }
+.stock-alert, .review, .mini-order, .account-box { border-radius: 16px; }
+.toast { border-radius: 999px; }
+
+/* Pied de page */
+.site-footer { background: #fff; border-top: 0; border-radius: 32px 32px 0 0; margin-top: 64px; }
+.footer-bottom { border-top-color: var(--line); }
