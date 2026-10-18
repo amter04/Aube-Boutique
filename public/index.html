@@ -123,6 +123,50 @@
       </div>
       <div class="grid" id="product-grid">
         <!-- Rempli par app.js -->
+        <!-- Section Avis Clients -->
+<section id="product-reviews-section" class="reviews-container">
+  <h3>Avis clients vérifiés</h3>
+
+  <!-- Résumé des notes -->
+  <div id="reviews-summary" class="reviews-summary">
+    <span id="average-rating-stars" class="stars-display">⭐⭐⭐⭐⭐</span>
+    <span id="average-rating-score" class="rating-score">0 / 5</span>
+    <span id="total-reviews-count" class="reviews-count">(0 avis)</span>
+  </div>
+
+  <!-- Formulaire de dépôt d'avis (pour les clientes connectées) -->
+  <form id="review-form" class="review-form" enctype="multipart/form-data">
+    <h4>Laisser un avis vérifié</h4>
+    
+    <div class="form-group">
+      <label for="review-rating">Note :</label>
+      <select id="review-rating" name="rating" required>
+        <option value="5">⭐⭐⭐⭐⭐ — Excellent (5/5)</option>
+        <option value="4">⭐⭐⭐⭐ — Très bon (4/5)</option>
+        <option value="3">⭐⭐⭐ — Moyen (3/5)</option>
+        <option value="2">⭐⭐ — Décevant (2/5)</option>
+        <option value="1">⭐ — Très décevant (1/5)</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="review-comment">Ton commentaire :</label>
+      <textarea id="review-comment" name="comment" minlength="5" maxlength="1000" placeholder="Taille, coupe, matière, rendu porté..." required></textarea>
+    </div>
+
+    <div class="form-group">
+      <label for="review-image">Photo de la pièce portée (optionnel) :</label>
+      <input type="file" id="review-image" name="image" accept="image/jpeg,image/png,image/webp">
+    </div>
+
+    <button type="submit" class="btn-submit-review">Publier mon avis</button>
+  </form>
+
+  <!-- Liste des avis approuvés -->
+  <div id="reviews-list" class="reviews-list">
+    <!-- Les avis seront injectés ici en JS -->
+  </div>
+</section>
       </div>
     </div>
   </section>
