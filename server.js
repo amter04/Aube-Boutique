@@ -123,7 +123,7 @@ function createAttemptLimiter({ name, max, windowMs }) {
       if (!rec || rec.resetAt <= Date.now()) hits.set(k, { count: 1, resetAt: Date.now() + windowMs });
       else rec.count++;
     },
-    reset(req, id) { hits.delete(keyOf(req, id)); }
+    reset(req, id) { hits.delete(k); }
   };
 }
 
@@ -154,8 +154,6 @@ const registerLimiter = createRequestLimiter({ name: 'register', max: 6, windowM
 const checkoutLimiter = createRequestLimiter({ name: 'checkout', max: 15, windowMs: 60 * 60 * 1000 });
 const paypalLimiter = createRequestLimiter({ name: 'paypal', max: 40, windowMs: 60 * 60 * 1000 });
 const tokenLookupLimiter = createRequestLimiter({ name: 'token-lookup', max: 40, windowMs: 10 * 60 * 1000 });
-
-const DUMMY_HASH = store.hashPassword('aube-faux-mot-de-passe-pour-le-timing');
 
 // ======================================================================
 // 2. SÉCURITÉ HTTP
@@ -774,15 +772,27 @@ function mountRoutes() {
     staffLoginIpLimiter.check(req);
     staffLoginMailLimiter.check(req, email.toLowerCase());
 
-    const data = await store.load();
-    const employee = (data.employees || []).find(e => store.normalizeEmail(e.email) === store.normalizeEmail(email));
-    const ok = store.verifyPassword(password, employee ? employee.passwordHash : DUMMY_HASH) && employee && employee.active !== false;
-    if (!ok) {
+    // 1. Authentification via Supabase Auth
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    });
+
+    if (authError) {
       staffLoginIpLimiter.fail(req);
       staffLoginMailLimiter.fail(req, email.toLowerCase());
       audit('login.staff.fail', req, { email });
       throw new HttpError(401, 'Identifiants incorrects');
     }
+
+    // 2. Vérification du statut dans la table store
+    const data = await store.load();
+    const employee = (data.employees || []).find(e => store.normalizeEmail(e.email) === store.normalizeEmail(email));
+
+    if (!employee || employee.active === false) {
+      throw new HttpError(403, 'Accès refusé ou compte désactivé.');
+    }
+
     staffLoginMailLimiter.reset(req, email.toLowerCase());
     await establishSession(req, { role: 'employee', employeeId: employee.id, roleSince: Date.now() }, STAFF_SESSION_MS);
     audit('login.staff.ok', req, { employeeId: employee.id });
@@ -799,7 +809,7 @@ function mountRoutes() {
     res.json({ isAdmin: who.role === 'admin', role: who.role, name: who.name });
   }));
 
-  // ----- Comptes employés (patron) -----
+  // ----- Comptes employés (créés par le patron via Supabase Admin) -----
   app.get('/api/admin/employees', requireAdmin, asyncHandler(async (req, res) => {
     const data = await store.load();
     res.json((data.employees || []).map(toPublicEmployee));
@@ -810,15 +820,40 @@ function mountRoutes() {
     const email = validEmail(req.body && req.body.email);
     if (!name || !email) throw new HttpError(400, 'Nom et email valides requis');
     const password = checkPassword(req.body.password);
+
+    // 1. Création du compte employé dans Supabase Auth (Admin API)
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true, // Email marqué comme vérifié par le patron
+      user_metadata: { name, role: 'employee' }
+    });
+
+    if (authError) {
+      if (authError.message.includes('already registered')) {
+        throw new HttpError(409, 'Un compte existe déjà avec cet email.');
+      }
+      throw new HttpError(400, authError.message);
+    }
+
+    // 2. Synchronisation dans store.employees
     const employee = await store.withTransaction(async (data) => {
       if (data.employees.length >= 50) throw new HttpError(400, 'Nombre maximum d\'employés atteint');
       if (data.employees.some(e => store.normalizeEmail(e.email) === store.normalizeEmail(email))) {
-        throw new HttpError(400, 'Un compte employe existe deja avec cet email');
+        throw new HttpError(400, 'Un compte employé existe déjà avec cet email.');
       }
-      const e = { id: data.nextEmployeeId++, name, email, passwordHash: store.hashPassword(password), active: true, createdAt: new Date().toISOString() };
+      const e = {
+        id: data.nextEmployeeId++,
+        supabaseUid: authData.user ? authData.user.id : null,
+        name,
+        email: store.normalizeEmail(email),
+        active: true,
+        createdAt: new Date().toISOString()
+      };
       data.employees.push(e);
       return e;
     });
+
     audit('employee.created', req, { employeeId: employee.id });
     res.status(201).json(toPublicEmployee(employee));
   }));
@@ -831,9 +866,14 @@ function mountRoutes() {
       const e = data.employees.find(x => x.id === id);
       if (!e) throw new HttpError(404, 'Employe introuvable');
       if (active !== undefined) e.active = !!active;
-      if (newPassword) e.passwordHash = store.hashPassword(newPassword);
       return e;
     });
+
+    // Si le mot de passe est modifié, on le met à jour dans Supabase Auth
+    if (newPassword && employee.supabaseUid) {
+      await supabase.auth.admin.updateUserById(employee.supabaseUid, { password: newPassword });
+    }
+
     invalidateStaff(id);
     audit('employee.updated', req, { employeeId: id });
     res.json(toPublicEmployee(employee));
@@ -841,7 +881,16 @@ function mountRoutes() {
 
   app.delete('/api/admin/employees/:id', requireAdmin, asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
-    await store.withTransaction(async (data) => { data.employees = data.employees.filter(e => e.id !== id); });
+    const employee = await store.withTransaction(async (data) => {
+      const e = data.employees.find(x => x.id === id);
+      data.employees = data.employees.filter(x => x.id !== id);
+      return e;
+    });
+
+    if (employee && employee.supabaseUid) {
+      await supabase.auth.admin.deleteUser(employee.supabaseUid);
+    }
+
     invalidateStaff(id);
     audit('employee.deleted', req, { employeeId: id });
     res.json({ ok: true });
@@ -855,7 +904,7 @@ function mountRoutes() {
 
     if (!name || !email) throw new HttpError(400, 'Nom et email valides requis');
 
-    // 1. Inscription via Supabase Auth (déclenche l'email de confirmation via SMTP Resend)
+    // 1. Inscription via Supabase Auth (déclenche l'email via SMTP Resend)
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
