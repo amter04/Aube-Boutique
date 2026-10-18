@@ -1044,3 +1044,183 @@ img {
 #test-checkout-form .test-mode-note {
   margin-bottom: 18px;
 }
+/* ======================================================================
+   AVIS CLIENTS VÉRIFIÉS (Modale Produit)
+   ====================================================================== */
+
+.reviews-container {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border-color, #e8e4e1);
+  font-family: inherit;
+}
+
+.reviews-container h3 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-color, #201a16);
+  margin-bottom: 16px;
+}
+
+/* Résumé des notes */
+.reviews-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background-color: var(--bg-subtle, #f9f8f6);
+  border-radius: 8px;
+  margin-bottom: 24px;
+}
+
+.stars-display {
+  font-size: 18px;
+  letter-spacing: 2px;
+  color: #d4a373; /* Couleur dorée chaleureuse */
+}
+
+.rating-score {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-color, #201a16);
+}
+
+.reviews-count {
+  font-size: 14px;
+  color: var(--text-muted, #766e65);
+}
+
+/* Formulaire de dépôt d'avis */
+.review-form {
+  background: var(--bg-card, #ffffff);
+  border: 1px solid var(--border-color, #e8e4e1);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.review-form h4 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: var(--text-color, #201a16);
+}
+
+.review-form .field {
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.review-form label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-color, #201a16);
+}
+
+.review-form select,
+.review-form textarea,
+.review-form input[type="file"] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #d3ccc5);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 14px;
+  background-color: #fff;
+  transition: border-color 0.2s ease;
+}
+
+.review-form select:focus,
+.review-form textarea:focus {
+  outline: none;
+  border-color: var(--accent-wine, #6b2d39);
+}
+
+.review-form textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.review-form input[type="file"] {
+  padding: 8px;
+  font-size: 13px;
+  color: var(--text-muted, #766e65);
+}
+
+/* Liste des avis */
+.reviews-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.review-card {
+  padding: 16px;
+  border-bottom: 1px solid var(--border-color, #f0ece9);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.review-card:last-child {
+  border-bottom: none;
+}
+
+.review-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.review-author {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-color, #201a16);
+}
+
+.review-stars {
+  color: #d4a373;
+  font-size: 14px;
+  letter-spacing: 1px;
+}
+
+.review-date {
+  font-size: 12px;
+  color: var(--text-muted, #8c827a);
+}
+
+.review-comment {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-body, #3d352e);
+  margin: 0;
+}
+
+/* Photo portée par la cliente */
+.review-image-wrap {
+  margin-top: 8px;
+}
+
+.review-image-wrap img {
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #e8e4e1);
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.review-image-wrap img:hover {
+  transform: scale(1.05);
+}
+
+.no-reviews {
+  font-size: 14px;
+  color: var(--text-muted, #8c827a);
+  font-style: italic;
+  text-align: center;
+  padding: 16px 0;
+}
