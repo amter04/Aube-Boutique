@@ -366,5 +366,39 @@ body.admin { background: var(--paper); }
     padding: 20px 14px;
   }
 }
+/* ===================== THÈME TERRE : espace patron ===================== */
+body.admin .admin-header { background: #fff; border-bottom: 0; }
+.admin-header .wrap { height: 76px; }
+.admin-tag { background: var(--tint); border: 0; color: var(--ink); font-weight: 600; padding: 6px 14px; }
+.login-card { background: #fff; border: 0; border-radius: 24px; box-shadow: 0 16px 40px rgba(31,58,46,.10); }
+.admin-tabs { gap: 10px; }
+.admin-tab { border: 0; background: #fff; border-radius: 999px; padding: 11px 22px; font-weight: 600; }
+.admin-tab:hover { background: var(--tint); }
+.admin-tab.active { background: var(--ink); color: #fff; }
+@media (min-width: 861px) { .admin-tabs { flex-wrap: wrap; } }
 
+.panel { background: #fff; border: 0; border-radius: 24px; padding: 28px; }
+.panel h3 { font-family: 'Young Serif', serif; font-weight: 400; font-size: 22px; }
+.stat-card { background: #fff; border: 0; border-radius: 20px; padding: 22px; }
+.stat-card.warn { box-shadow: inset 0 0 0 2px var(--wine); }
+.stat-card.warn .stat-value { color: var(--wine); }
+.stat-value { font-family: 'Young Serif', serif; font-weight: 400; font-size: 36px; }
+.stat-label { color: var(--soft); }
+
+.product-table th { text-transform: uppercase; letter-spacing: .06em; font-size: 12px; color: var(--soft); }
+.product-table img { border-radius: 10px; }
+.row-actions { flex-wrap: wrap; }
+.row-actions button {
+  border: 2px solid var(--ink); border-radius: 999px; padding: 6px 14px;
+  text-decoration: none; font-weight: 600; font-size: 13px; background: none;
+}
+.row-actions button:hover { background: var(--tint); }
+.row-actions .danger { border-color: var(--err); color: var(--err); }
+.stock-low { color: var(--wine); font-weight: 600; }
+
+.size-row, .promo-box { border-radius: 14px; }
+.photo-thumb, .photo-add { border-radius: 12px; }
+.status-pill.paid { background: #DCE8D2; color: var(--ok); border-color: transparent; }
+.status-pill.created { background: #EEF1E8; color: var(--soft); border-color: transparent; }
+.badge-tag.promo { background: #F6E3D3; color: #9A4A22; }
 
