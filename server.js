@@ -1,15 +1,6 @@
 'use strict';
 /**
- * AUBE — serveur de la boutique (version consolidée et sécurisée)
- *
- * ORGANISATION DU FICHIER
- *    0. Configuration et vérifications au démarrage
- *    1. Outils : erreurs, validation des saisies, limiteurs de tentatives
- *    2. Sécurité : en-têtes (CSP), contrôle d'origine, sessions en base
- *    3. Points d'extension : c'est ICI que se branchent les futures options
- *    4. Images, produits, commandes, fidélité, emails
- *    5. Routes (publiques, clientes, équipe, patron, paiement)
- *    6. Démarrage
+ * AUBE — serveur de la boutique (version hybride Supabase Auth + Store)
  */
 require('dotenv').config();
 const path = require('path');
@@ -20,6 +11,7 @@ const session = require('express-session');
 const multer = require('multer');
 const store = require('./db/store');
 const storage = require('./db/storage');
+const { supabase } = require('./db/supabase');
 
 let pool = null;
 try { pool = require('./db/pool').pool || null; } catch (e) { pool = null; }
@@ -640,22 +632,6 @@ function findCustomerByEmail(data, email) {
   return data.customers.find(c => store.normalizeEmail(c.email) === norm);
 }
 
-function createCustomer(data, { name, email, password }) {
-  const confirmToken = secureToken(32);
-  const customer = {
-    id: data.nextCustomerId++,
-    name,
-    email: store.normalizeEmail(email),
-    passwordHash: store.hashPassword(password),
-    confirmed: false, // Bloqué tant que non confirmé par email
-    confirmToken,
-    points: 0,
-    createdAt: new Date().toISOString()
-  };
-  data.customers.push(customer);
-  return customer;
-}
-
 function sanitizeCustomerInfo(c) {
   if (!c || typeof c !== 'object') throw new HttpError(400, 'Nom et email requis');
   const name = clean(c.name, 100);
@@ -871,48 +847,98 @@ function mountRoutes() {
     res.json({ ok: true });
   }));
 
-  // ----- Comptes clients -----
+  // ----- Comptes clients (via Supabase Auth) -----
   app.post('/api/auth/register', registerLimiter, asyncHandler(async (req, res) => {
     const name = clean(req.body && req.body.name, 100);
     const email = validEmail(req.body && req.body.email);
+    const password = checkPassword(req.body && req.body.password);
+
     if (!name || !email) throw new HttpError(400, 'Nom et email valides requis');
-    const password = checkPassword(req.body.password);
-    const customer = await store.withTransaction(async (data) => {
-      if (findCustomerByEmail(data, email)) throw new HttpError(409, 'Un compte existe deja avec cet email');
-      return createCustomer(data, { name, email, password });
+
+    // 1. Inscription via Supabase Auth (déclenche l'email de confirmation via SMTP Resend)
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { name, role: 'customer' }
+      }
     });
 
-    // Émet l'événement pour envoyer l'email de confirmation via le module
-    hooks.emit('customer.created', { customer });
+    if (authError) {
+      if (authError.message.includes('already registered')) {
+        throw new HttpError(409, 'Un compte existe déjà avec cet email.');
+      }
+      throw new HttpError(400, authError.message);
+    }
 
-    res.status(201).json({ ok: true, message: 'Compte créé ! Veuillez vérifier votre boîte mail pour confirmer votre inscription.' });
+    // 2. Synchronisation dans store.customers pour les commandes et les statistiques
+    await store.withTransaction(async (data) => {
+      let c = findCustomerByEmail(data, email);
+      if (!c) {
+        c = {
+          id: data.nextCustomerId++,
+          supabaseUid: authData.user ? authData.user.id : null,
+          name,
+          email: store.normalizeEmail(email),
+          points: 0,
+          createdAt: new Date().toISOString()
+        };
+        data.customers.push(c);
+      }
+      return c;
+    });
+
+    res.status(201).json({
+      ok: true,
+      message: 'Compte créé ! Merci de vérifier tes mails pour confirmer ton inscription.'
+    });
   }));
 
   app.post('/api/auth/login', asyncHandler(async (req, res) => {
     const email = validEmail(req.body && req.body.email);
     const password = String((req.body && req.body.password) || '').slice(0, PASSWORD_MAX);
     if (!email || !password) throw new HttpError(400, 'Email et mot de passe requis');
+
     customerLoginIpLimiter.check(req);
     customerLoginMailLimiter.check(req, email.toLowerCase());
-    const data = await store.load();
-    const customer = findCustomerByEmail(data, email);
 
-    // Supporte passwordHash et password
-    const pwdHash = customer ? (customer.passwordHash || customer.password) : DUMMY_HASH;
-    const ok = store.verifyPassword(password, pwdHash) && !!customer;
+    // 1. Authentification via Supabase Auth
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    });
 
-    if (!ok) {
+    if (authError) {
       customerLoginIpLimiter.fail(req);
       customerLoginMailLimiter.fail(req, email.toLowerCase());
-      throw new HttpError(401, 'Email ou mot de passe incorrect');
-    }
 
-    // Blocage si le compte n'a pas encore été confirmé
-    if (customer.confirmed === false) {
-      throw new HttpError(403, 'Merci de confirmer votre adresse email en cliquant sur le lien reçu par mail.');
+      if (authError.message.includes('Email not confirmed')) {
+        throw new HttpError(403, 'Merci de confirmer ton adresse email en cliquant sur le lien reçu par mail.');
+      }
+      throw new HttpError(401, 'Email ou mot de passe incorrect.');
     }
 
     customerLoginMailLimiter.reset(req, email.toLowerCase());
+
+    // 2. Synchronisation avec store.customers
+    const data = await store.load();
+    let customer = findCustomerByEmail(data, email);
+
+    if (!customer) {
+      customer = await store.withTransaction(async (dbData) => {
+        const c = {
+          id: dbData.nextCustomerId++,
+          supabaseUid: authData.user.id,
+          name: authData.user.user_metadata.name || 'Cliente',
+          email: store.normalizeEmail(email),
+          points: 0,
+          createdAt: new Date().toISOString()
+        };
+        dbData.customers.push(c);
+        return c;
+      });
+    }
+
     await establishSession(req, { customerId: customer.id }, CUSTOMER_SESSION_MS);
     res.json({ ok: true, customer: toPublicCustomer(customer) });
   }));
@@ -1175,7 +1201,14 @@ function mountRoutes() {
       if (sessionCustomerId) account = data.customers.find(c => c.id === sessionCustomerId) || null;
       else if (createAccount) {
         if (findCustomerByEmail(data, customerInfo.email)) throw new HttpError(409, 'Un compte existe deja avec cet email. Connecte-toi pour continuer.');
-        account = createCustomer(data, { name: customerInfo.name, email: customerInfo.email, password: newPassword });
+        account = {
+          id: data.nextCustomerId++,
+          name: customerInfo.name,
+          email: store.normalizeEmail(customerInfo.email),
+          points: 0,
+          createdAt: new Date().toISOString()
+        };
+        data.customers.push(account);
       }
 
       const priced = await priceOrder(data, { cart, account, redeemPoints: body.redeemPoints, body });
