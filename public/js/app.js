@@ -28,6 +28,16 @@
   };
   function texts() { return { ...DEFAULT_TEXTS, ...(state.config.shopTexts || {}) }; }
 
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   function infoPage(key) {
     const L = state.config.loyalty || {};
     const flat = (state.config.shippingFlatCents || 0) / 100;
@@ -678,21 +688,81 @@
     renderGrid();
   }
 
-  async function loadReviews() {
-    const data = await fetchJsonOptional('/api/reviews');
-    const section = el('#reviews');
-    if (!Array.isArray(data) || data.length === 0) { section.style.display = 'none'; return; }
-    section.style.display = '';
-    el('#reviews-grid').innerHTML = data.slice(0, 6).map(r => {
-      const stars = r.rating ? '★'.repeat(Math.round(r.rating)) + '☆'.repeat(5 - Math.round(r.rating)) : '';
-      return `
-        <div class="review">
-          ${stars ? `<div class="review-stars">${stars}</div>` : ''}
-          <p class="review-text">« ${r.text} »</p>
-          <div class="review-author">${r.name || ''}</div>
+  // --- GESTION DES AVIS PRODUIT ---
+  function renderStars(rating) {
+    const full = Math.round(rating || 0);
+    return '★'.repeat(full) + '☆'.repeat(5 - full);
+  }
+
+  async function loadProductReviews(productId) {
+    const summaryEl = el('#reviews-summary');
+    const listEl = el('#reviews-list');
+    if (!listEl) return;
+
+    try {
+      const res = await fetch(`/api/products/${productId}/reviews`);
+      if (!res.ok) return;
+      
+      const data = await res.json();
+
+      if (el('#average-rating-stars')) el('#average-rating-stars').textContent = renderStars(data.averageRating);
+      if (el('#average-rating-score')) el('#average-rating-score').textContent = `${data.averageRating || 0} / 5`;
+      if (el('#total-reviews-count')) el('#total-reviews-count').textContent = `(${data.totalReviews || 0} avis)`;
+
+      if (!data.reviews || data.reviews.length === 0) {
+        listEl.innerHTML = '<p class="no-reviews">Aucun avis pour le moment sur cette pièce.</p>';
+        return;
+      }
+
+      listEl.innerHTML = data.reviews.map(review => `
+        <div class="review-card">
+          <div class="review-header">
+            <span class="review-author">${escapeHtml(review.authorName)}</span>
+            <span class="review-stars">${renderStars(review.rating)}</span>
+            <small class="review-date">${new Date(review.createdAt).toLocaleDateString('fr-FR')}</small>
+          </div>
+          <p class="review-comment">${escapeHtml(review.comment)}</p>
+          ${review.imageUrl ? `
+            <div class="review-image-wrap">
+              <a href="${review.imageUrl}" target="_blank">
+                <img src="${review.imageUrl}" alt="Photo de ${escapeHtml(review.authorName)}" />
+              </a>
+            </div>
+          ` : ''}
         </div>
-      `;
-    }).join('');
+      `).join('');
+
+    } catch (err) {
+      console.error('Erreur chargement avis :', err);
+    }
+  }
+
+  const reviewForm = el('#review-form');
+  if (reviewForm) {
+    reviewForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!state.modalProduct) {
+        alert('Aucun produit sélectionné.');
+        return;
+      }
+
+      const formData = new FormData(e.target);
+      try {
+        const res = await fetch(`/api/products/${state.modalProduct.id}/reviews`, {
+          method: 'POST',
+          body: formData
+        });
+        
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.error || 'Erreur lors de l\'envoi de l\'avis.');
+
+        alert(result.message);
+        e.target.reset();
+        loadProductReviews(state.modalProduct.id);
+      } catch (err) {
+        alert(err.message);
+      }
+    });
   }
 
   const modal = el('#product-modal');
@@ -716,6 +786,8 @@
     updateModalAddButton();
     renderPerks(p);
     renderRelated(p);
+    loadProductReviews(p.id);
+
     modal.classList.add('open');
     modal.querySelector('.modal-card').scrollTop = 0;
 
@@ -758,12 +830,10 @@
     const wrap = el('#modal-related-wrap');
     let list = [];
     
-    // Cross-selling : priorité aux pièces associées spécifiquement par le patron
     if (p.ext && Array.isArray(p.ext.relatedIds) && p.ext.relatedIds.length > 0) {
       list = state.products.filter(x => p.ext.relatedIds.includes(x.id) && x.inStock);
     }
 
-    // Complément automatique si nécessaire
     if (list.length < 4) {
       const sameCat = state.products.filter(x => x.id !== p.id && x.inStock && p.category && x.category === p.category && !list.includes(x));
       const others = state.products.filter(x => x.id !== p.id && x.inStock && !sameCat.includes(x) && !list.includes(x));
@@ -873,7 +943,6 @@
       container.innerHTML = '';
       return;
     }
-    const alertsOn = !!state.config.stockAlertsEnabled;
     container.innerHTML = p.sizes.map(s => `
       <button type="button" class="size-opt ${s.size === state.modalSelectedSize ? 'selected' : ''} ${!s.inStock ? 'out' : ''}"
         data-size="${s.size}">${s.size}</button>
@@ -1409,80 +1478,6 @@
       if (state.products.some(p => p.id === id)) openProductModal(id, false);
     }
   }
-  // Render des étoiles
-function renderStars(rating) {
-  const full = Math.round(rating);
-  return '★'.repeat(full) + '☆'.repeat(5 - full);
-}
-
-// 1. Charger et afficher les avis d'un produit
-async function loadProductReviews(productId) {
-  const summaryEl = document.getElementById('reviews-summary');
-  const listEl = document.getElementById('reviews-list');
-
-  try {
-    const res = await fetch(`/api/products/${productId}/reviews`);
-    if (!res.ok) throw new Error('Impossible de charger les avis');
-    
-    const data = await res.json();
-
-    // Mise à jour du résumé
-    document.getElementById('average-rating-stars').textContent = renderStars(data.averageRating);
-    document.getElementById('average-rating-score').textContent = `${data.averageRating} / 5`;
-    document.getElementById('total-reviews-count').textContent = `(${data.totalReviews} avis)`;
-
-    // Affichage des avis
-    if (data.reviews.length === 0) {
-      listEl.innerHTML = '<p class="no-reviews">Aucun avis pour le moment sur cette pièce.</p>';
-      return;
-    }
-
-    listEl.innerHTML = data.reviews.map(review => `
-      <div class="review-card">
-        <div class="review-header">
-          <strong>${escapeHtml(review.authorName)}</strong>
-          <span class="stars">${renderStars(review.rating)}</span>
-          <small>${new Date(review.createdAt).toLocaleDateString('fr-FR')}</small>
-        </div>
-        <p class="review-comment">${escapeHtml(review.comment)}</p>
-        ${review.imageUrl ? `
-          <div class="review-image">
-            <a href="${review.imageUrl}" target="_blank">
-              <img src="${review.imageUrl}" alt="Photo de ${escapeHtml(review.authorName)}" />
-            </a>
-          </div>
-        ` : ''}
-      </div>
-    `).join('');
-
-  } catch (err) {
-    console.error('Erreur chargement avis :', err);
-  }
-}
-
-// 2. Soumettre un nouvel avis
-document.getElementById('review-form')?.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  
-  const productId = getCurrentProductId(); // Récupère l'ID du produit affiché
-  const formData = new FormData(e.target);
-
-  try {
-    const res = await fetch(`/api/products/${productId}/reviews`, {
-      method: 'POST',
-      body: formData
-    });
-    
-    const result = await res.json();
-
-    if (!res.ok) throw new Error(result.error || 'Erreur lors de l\'envoi de l\'avis.');
-
-    alert(result.message);
-    e.target.reset();
-  } catch (err) {
-    alert(err.message);
-  }
-});
 
   window.addEventListener('popstate', () => {
     const match = window.location.pathname.match(/^\/produit\/(\d+)/);
@@ -1529,8 +1524,5 @@ document.getElementById('review-form')?.addEventListener('submit', async (e) => 
     renderWishlistCount();
     connectRealtime();
     openProductFromUrl();
-    loadReviews();
   })();
 })();
-
-
