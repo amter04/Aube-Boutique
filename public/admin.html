@@ -54,7 +54,7 @@
     <div class="stats-grid" id="stats-grid"></div>
   </section>
 
-  <section id="tab-products" style="display:none;">
+<section id="tab-products" style="display:none;">
     <div class="admin-layout">
       <div class="panel">
         <h3 id="form-title">Ajouter une pièce</h3>
@@ -68,14 +68,27 @@
             <p class="hint">La première photo est celle affichée dans le catalogue. Elles sont redimensionnées et compressées automatiquement.</p>
           </div>
 
-          <div class="field">
-            <label for="p-name">Nom</label>
-            <input type="text" id="p-name" required placeholder="Ex. Robe Lin Écru">
+          <div class="field-row">
+            <div class="field">
+              <label for="p-ref">Référence / SKU</label>
+              <input type="text" id="p-ref" placeholder="Ex. ROB-LIN-001">
+            </div>
+            <div class="field">
+              <label for="p-name">Nom</label>
+              <input type="text" id="p-name" required placeholder="Ex. Robe Lin Écru">
+            </div>
           </div>
+
+          <div class="field">
+            <label for="p-colors">Couleurs disponibles</label>
+            <input type="text" id="p-colors" placeholder="Ex. Écru, Beige, Noir (séparées par des virgules)">
+          </div>
+
           <div class="field">
             <label for="p-desc">Description</label>
             <textarea id="p-desc" placeholder="Matière, coupe, entretien..."></textarea>
           </div>
+
           <div class="field">
             <label for="p-price">Prix (€)</label>
             <input type="number" id="p-price" step="0.01" min="0" required>
@@ -135,10 +148,19 @@
       </div>
 
       <div class="panel">
-        <h3>Catalogue</h3>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0;">Catalogue</h3>
+          <!-- Tri / Filtre par catégorie -->
+          <div style="display:flex; align-items:center; gap:8px;">
+            <label for="filter-category" style="font-size:13px; font-weight:bold;">Filtrer :</label>
+            <select id="filter-category" style="padding:4px 8px; font-size:13px;">
+              <option value="ALL">Toutes les catégories</option>
+            </select>
+          </div>
+        </div>
         <table class="product-table">
           <thead>
-            <tr><th></th><th>Nom</th><th>Prix</th><th>Stock total</th><th>Statut</th><th></th></tr>
+            <tr><th></th><th>Réf. / Nom</th><th>Couleurs</th><th>Prix</th><th>Stock total</th><th>Statut</th><th></th></tr>
           </thead>
           <tbody id="product-rows"></tbody>
         </table>
