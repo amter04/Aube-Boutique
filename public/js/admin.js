@@ -7,18 +7,19 @@
 
   let products = [];
   let editingId = null;
-  let existingImages = []; // URLs deja sur le serveur, conservees a l'enregistrement
-  let newFiles = []; // File[] nouvellement selectionnes
+  let existingImages = [];
+  let newFiles = [];
 
   function showToast(msg) {
     const t = el('#toast');
+    if (!t) return;
     t.textContent = msg;
     t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), 2200);
   }
 
   // ---------- Auth ----------
-  let role = null; // 'admin' (patron) ou 'employee'
+  let role = null;
   let loginMode = 'admin';
 
   function esc(str) {
@@ -43,7 +44,7 @@
     el('#login-screen').style.display = 'none';
     el('#admin-main').style.display = 'block';
     el('#logout-btn').style.display = 'inline-flex';
-    // Les onglets réservés au patron sont cachés pour un employé
+    
     document.querySelectorAll('.admin-tab[data-role="admin"]').forEach(t => {
       t.style.display = role === 'admin' ? '' : 'none';
     });
@@ -92,7 +93,7 @@
   // ---------- Tabs ----------
   function selectTab(target) {
     document.querySelectorAll('.admin-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === target));
-    ['dashboard', 'products', 'orders', 'customers', 'promos', 'team', 'settings'].forEach(name => {
+    ['dashboard', 'products', 'orders', 'customers', 'promos', 'reviews', 'team', 'settings'].forEach(name => {
       const tabEl = el('#tab-' + name);
       if (tabEl) tabEl.style.display = name === target ? 'block' : 'none';
     });
@@ -100,6 +101,7 @@
     if (target === 'dashboard') loadStats();
     if (target === 'customers') loadCustomers();
     if (target === 'promos') loadPromos();
+    if (target === 'reviews') loadAdminReviews();
     if (target === 'team') loadEmployees();
   }
 
@@ -107,7 +109,7 @@
     tab.addEventListener('click', () => selectTab(tab.dataset.tab));
   });
 
-  // ---------- Équipe (comptes employés, réservé au patron) ----------
+  // ---------- Équipe ----------
   async function loadEmployees() {
     const res = await fetch('/api/admin/employees');
     if (res.status === 401) return showLogin();
@@ -249,7 +251,7 @@
     showToast('Réglages enregistrés');
   });
 
-  // ---------- Clients / fidelite ----------
+  // ---------- Clients ----------
   async function loadCustomers() {
     const res = await fetch('/api/admin/customers');
     if (res.status === 401) return showLogin();
@@ -262,8 +264,8 @@
     }
     tbody.innerHTML = customers.map(c => `
       <tr>
-        <td>${c.name}</td>
-        <td>${c.email}</td>
+        <td>${esc(c.name)}</td>
+        <td>${esc(c.email)}</td>
         <td><strong>${c.points}</strong></td>
         <td>${c.ordersCount}</td>
         <td>${new Date(c.createdAt).toLocaleDateString('fr-FR')}</td>
@@ -352,6 +354,69 @@
     loadPromos();
   });
 
+  // ---------- Avis Clients ----------
+  async function loadAdminReviews() {
+    try {
+      const res = await fetch('/api/admin/reviews');
+      if (res.status === 401) return showLogin();
+      const reviews = await res.json();
+
+      const container = document.getElementById('admin-reviews-list');
+      if (!container) return;
+
+      if (!reviews || reviews.length === 0) {
+        container.innerHTML = '<p style="color:#918A80; padding:12px 0;">Aucun avis soumis pour le moment.</p>';
+        return;
+      }
+
+      container.innerHTML = reviews.map(r => `
+        <div class="admin-review-card status-${r.status}" style="border: 1px solid #e8e4e1; padding: 16px; border-radius: 8px; margin-bottom: 12px; background: #fff;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <strong>${esc(r.productName || 'Produit #' + r.productId)}</strong>
+            <span style="color: #d4a373;">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)} (${r.rating}/5)</span>
+          </div>
+          <p style="margin: 4px 0;"><strong>${esc(r.authorName)}</strong> : "${esc(r.comment)}"</p>
+          ${r.imageUrl ? `<div style="margin: 8px 0;"><a href="${r.imageUrl}" target="_blank"><img src="${r.imageUrl}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px; border:1px solid #ddd;" /></a></div>` : ''}
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; border-top:1px solid #f0ece9; padding-top:8px;">
+            <small style="color: #766e65;">Statut : <strong>${r.status === 'pending' ? 'En attente ⏳' : (r.status === 'approved' ? 'Approuvé ✅' : 'Refusé ❌')}</strong></small>
+            ${r.status === 'pending' ? `
+              <div>
+                <button data-id="${r.id}" data-status="approved" class="btn mod-review-btn" style="background:#2e7d32; color:#fff; padding:6px 12px; border-radius:4px; margin-right:6px; cursor:pointer; border:none;">Approuver</button>
+                <button data-id="${r.id}" data-status="rejected" class="btn mod-review-btn" style="background:#c62828; color:#fff; padding:6px 12px; border-radius:4px; cursor:pointer; border:none;">Refuser</button>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      `).join('');
+
+      container.querySelectorAll('.mod-review-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = btn.dataset.id;
+          const status = btn.dataset.status;
+          await moderateReview(id, status);
+        });
+      });
+    } catch (err) {
+      console.error('Erreur chargement avis admin :', err);
+    }
+  }
+
+  async function moderateReview(id, status) {
+    try {
+      const res = await fetch(`/api/admin/reviews/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      });
+      if (res.ok) {
+        showToast(status === 'approved' ? 'Avis approuvé' : 'Avis refusé');
+        loadAdminReviews();
+      }
+    } catch (err) {
+      alert('Erreur lors de la modération de l\'avis.');
+    }
+  }
+
   // ---------- Category select ----------
   function refreshCategoryOptions(selected) {
     const select = el('#p-category');
@@ -409,7 +474,7 @@
     return sizes;
   }
 
-  // ---------- Photos (multi) ----------
+  // ---------- Photos ----------
   function renderPhotoGrid() {
     const container = el('#photo-grid');
     const existingThumbs = existingImages.map((url, i) => `
@@ -489,7 +554,7 @@
       return `
       <tr data-id="${p.id}">
         <td>${thumb ? `<img src="${thumb}" alt="">` : ''}</td>
-        <td>${p.name}${badgeTags ? `<div style="margin-top:4px;">${badgeTags}</div>` : ''}</td>
+        <td>${esc(p.name)}${badgeTags ? `<div style="margin-top:4px;">${badgeTags}</div>` : ''}</td>
         <td>${fmt(p.price)}${p.discountPercent ? ` <span style="color:#77706A;font-size:12px;">(-${p.discountPercent}%)</span>` : ''}</td>
         <td class="${p.stock === 0 ? 'stock-low' : ''}">${p.stock}</td>
         <td>${p.isActive ? 'En ligne' : 'Masqué'}</td>
@@ -625,57 +690,6 @@
     loadProducts();
     loadStats();
   }
-  // Charger et afficher la liste des avis clients pour modération
-async function loadAdminReviews() {
-  try {
-    const res = await fetch('/api/admin/reviews');
-    if (!res.ok) return;
-    const reviews = await res.json();
-
-    const container = document.getElementById('admin-reviews-list');
-    if (!container) return;
-
-    if (reviews.length === 0) {
-      container.innerHTML = '<p>Aucun avis soumis pour le moment.</p>';
-      return;
-    }
-
-    container.innerHTML = reviews.map(r => `
-      <div class="admin-review-card status-${r.status}" style="border: 1px solid #e8e4e1; padding: 16px; border-radius: 8px; margin-bottom: 12px; background: #fff;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <strong>${r.productName || 'Produit #' + r.productId}</strong>
-          <span style="color: #d4a373;">${'★'.repeat(r.rating)} (${r.rating}/5)</span>
-        </div>
-        <p style="margin: 4px 0;"><strong>${r.authorName}</strong> : "${r.comment}"</p>
-        ${r.imageUrl ? `<div style="margin: 8px 0;"><a href="${r.imageUrl}" target="_blank"><img src="${r.imageUrl}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px;" /></a></div>` : ''}
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px;">
-          <small style="color: #766e65;">Statut : <strong>${r.status === 'pending' ? 'En attente ⏳' : (r.status === 'approved' ? 'Approuvé ✅' : 'Refusé ❌')}</strong></small>
-          ${r.status === 'pending' ? `
-            <div>
-              <button onclick="moderateReview(${r.id}, 'approved')" class="btn" style="background:#2e7d32; color:#fff; padding:4px 12px; border-radius:4px; margin-right:6px;">Approuver</button>
-              <button onclick="moderateReview(${r.id}, 'rejected')" class="btn" style="background:#c62828; color:#fff; padding:4px 12px; border-radius:4px;">Refuser</button>
-            </div>
-          ` : ''}
-        </div>
-      </div>
-    `).join('');
-  } catch (err) {
-    console.error('Erreur chargement avis admin :', err);
-  }
-}
-
-async function moderateReview(id, status) {
-  try {
-    const res = await fetch(`/api/admin/reviews/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status })
-    });
-    if (res.ok) loadAdminReviews();
-  } catch (err) {
-    alert('Erreur lors de la modération de l\'avis.');
-  }
-}
 
   // ---------- Orders ----------
   async function loadOrders() {
@@ -699,16 +713,15 @@ async function moderateReview(id, status) {
             <span class="status-pill ${o.status === 'paid' ? 'paid' : 'created'}">${o.status === 'paid' ? 'Payée' : o.status}</span>
           </span>
         </div>
-        <div style="color:#77706A;">${o.payerName || 'Client'} ${o.payerEmail ? `· ${o.payerEmail}` : ''}</div>
-        ${address ? `<div style="color:#918A80; font-size:13px;">${address}</div>` : ''}
-        <div style="color:#918A80; font-size:13px;">${new Date(o.createdAt).toLocaleString('fr-FR')} · ${o.items.map(i => `${i.name}${i.size && i.size !== 'TU' ? ` (${i.size})` : ''} ×${i.qty}`).join(', ')}</div>
+        <div style="color:#77706A;">${esc(o.payerName || 'Client')} ${o.payerEmail ? `· ${esc(o.payerEmail)}` : ''}</div>
+        ${address ? `<div style="color:#918A80; font-size:13px;">${esc(address)}</div>` : ''}
+        <div style="color:#918A80; font-size:13px;">${new Date(o.createdAt).toLocaleString('fr-FR')} · ${o.items.map(i => `${esc(i.name)}${i.size && i.size !== 'TU' ? ` (${esc(i.size)})` : ''} ×${i.qty}`).join(', ')}</div>
         <div style="color:#918A80; font-size:12.5px; margin-top:4px;">Sous-total ${fmt(o.subtotal)} + livraison ${fmt(o.shipping)}${o.discount > 0 ? ` − ${fmt(o.discount)}` : ''}</div>
         ${(o.pointsEarned > 0 || o.pointsRedeemed > 0) ? `<div style="color:var(--wine); font-size:12.5px; margin-top:2px;">${o.pointsEarned > 0 ? `+${o.pointsEarned} points gagnés` : ''}${o.pointsEarned > 0 && o.pointsRedeemed > 0 ? ' · ' : ''}${o.pointsRedeemed > 0 ? `${o.pointsRedeemed} points utilisés` : ''}</div>` : ''}
       </div>
     `;
     }).join('');
   }
-  
 
   // ---------- Init ----------
   renderSizeGrid([]);
