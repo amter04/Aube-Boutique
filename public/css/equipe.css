@@ -143,3 +143,37 @@ button.eq-stat:hover { border-color: var(--ink); }
   .eq-prod-head { flex-wrap: wrap; }
   .eq-size { flex: 1 1 130px; }
 }
+/* ===================== THÈME TERRE : espace équipe ===================== */
+.eq-header { background: #fff; border-bottom: 0; }
+.eq-tag { background: var(--tint); border: 0; color: var(--ink); font-weight: 600; padding: 5px 12px; }
+.eq-login-card { background: #fff; border: 0; border-radius: 24px; box-shadow: 0 16px 40px rgba(31,58,46,.10); }
+
+.eq-tabs { border-bottom: 0; gap: 10px; }
+.eq-tab {
+  background: #fff; color: var(--ink); border-radius: 999px; border-bottom: 0;
+  margin-bottom: 0; padding: 11px 22px; font-weight: 600;
+}
+.eq-tab.active { background: var(--ink); color: #fff; border-bottom: 0; }
+.eq-count { background: var(--wine); }
+
+.eq-stat, .eq-urgent-row { background: #fff; border: 0; border-radius: 20px; }
+.eq-order, .eq-prod { background: #fff; border: 0; border-radius: 24px; overflow: hidden; }
+.eq-stat-value, .eq-order-num, .eq-qty, .eq-h3 { font-family: 'Young Serif', serif; font-weight: 400; }
+.eq-stat.warn { box-shadow: inset 0 0 0 2px var(--wine); }
+.eq-stat.warn .eq-stat-value { color: var(--wine); }
+.eq-prod.dirty { box-shadow: inset 0 0 0 2px var(--wine); }
+
+.eq-pill { background: #fff; border: 0; font-weight: 500; }
+.eq-pill.active { background: var(--ink); color: #fff; }
+.eq-status.to_prepare { background: #F6E3D3; color: #9A4A22; }
+.eq-status.prepared { background: var(--tint); color: var(--ink); }
+.eq-status.shipped { background: #DCE8D2; color: var(--ok); }
+.eq-tagpill.low { background: #F6E3D3; color: #9A4A22; }
+
+.eq-order-foot { background: #F7F9F3; border-top-color: var(--line); }
+.eq-order-head, .eq-prod-head { border-bottom-color: var(--line); }
+.eq-label, .eq-order-date, .eq-item-meta, .eq-prod-meta, .eq-total, .eq-history { color: var(--soft); }
+.eq-item img, .eq-ph { border: 0; border-radius: 10px; }
+.eq-size { background: #F7F9F3; border-radius: 14px; border-color: var(--line); }
+.eq-stepper button { border-radius: 50%; }
+.eq-stock-input, .eq-tracking, .eq-search { border-radius: 12px; }
