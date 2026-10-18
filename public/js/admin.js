@@ -625,6 +625,57 @@
     loadProducts();
     loadStats();
   }
+  // Charger et afficher la liste des avis clients pour modération
+async function loadAdminReviews() {
+  try {
+    const res = await fetch('/api/admin/reviews');
+    if (!res.ok) return;
+    const reviews = await res.json();
+
+    const container = document.getElementById('admin-reviews-list');
+    if (!container) return;
+
+    if (reviews.length === 0) {
+      container.innerHTML = '<p>Aucun avis soumis pour le moment.</p>';
+      return;
+    }
+
+    container.innerHTML = reviews.map(r => `
+      <div class="admin-review-card status-${r.status}" style="border: 1px solid #e8e4e1; padding: 16px; border-radius: 8px; margin-bottom: 12px; background: #fff;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <strong>${r.productName || 'Produit #' + r.productId}</strong>
+          <span style="color: #d4a373;">${'★'.repeat(r.rating)} (${r.rating}/5)</span>
+        </div>
+        <p style="margin: 4px 0;"><strong>${r.authorName}</strong> : "${r.comment}"</p>
+        ${r.imageUrl ? `<div style="margin: 8px 0;"><a href="${r.imageUrl}" target="_blank"><img src="${r.imageUrl}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px;" /></a></div>` : ''}
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px;">
+          <small style="color: #766e65;">Statut : <strong>${r.status === 'pending' ? 'En attente ⏳' : (r.status === 'approved' ? 'Approuvé ✅' : 'Refusé ❌')}</strong></small>
+          ${r.status === 'pending' ? `
+            <div>
+              <button onclick="moderateReview(${r.id}, 'approved')" class="btn" style="background:#2e7d32; color:#fff; padding:4px 12px; border-radius:4px; margin-right:6px;">Approuver</button>
+              <button onclick="moderateReview(${r.id}, 'rejected')" class="btn" style="background:#c62828; color:#fff; padding:4px 12px; border-radius:4px;">Refuser</button>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `).join('');
+  } catch (err) {
+    console.error('Erreur chargement avis admin :', err);
+  }
+}
+
+async function moderateReview(id, status) {
+  try {
+    const res = await fetch(`/api/admin/reviews/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    });
+    if (res.ok) loadAdminReviews();
+  } catch (err) {
+    alert('Erreur lors de la modération de l\'avis.');
+  }
+}
 
   // ---------- Orders ----------
   async function loadOrders() {
@@ -657,6 +708,7 @@
     `;
     }).join('');
   }
+  
 
   // ---------- Init ----------
   renderSizeGrid([]);
