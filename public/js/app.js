@@ -70,15 +70,15 @@
         return {
           title: 'Contact',
           html: state.config.contactEmail
-            ? `<p>Une question sur une commande ou une pièce ? Écris-nous à <a href="mailto:${state.config.contactEmail}">${state.config.contactEmail}</a>.</p>`
+            ? `<p>Une question sur une commande ou une pièce ? Écris-nous à <a href="mailto:${escapeHtml(state.config.contactEmail)}">${escapeHtml(state.config.contactEmail)}</a>.</p>`
             : `<p>Une question ? Écris-nous directement sur nos réseaux sociaux ou par email.</p>`
         };
       case 'cgv':
-        return { title: 'Conditions générales de vente', html: `<p>Conditions générales de vente de la boutique Aube.</p>` };
       case 'mentions':
-        return { title: 'Mentions légales', html: `<p>Mentions légales de la boutique Aube.</p>` };
-      case 'confidentialite':
-        return { title: 'Politique de confidentialité', html: `<p>Politique de confidentialité et protection des données.</p>` };
+      case 'confidentialite': {
+        const page = window.AubeLegal && window.AubeLegal.page(key, state.config);
+        return page || { title: '', html: '' };
+      }
       default:
         return { title: '', html: '' };
     }
@@ -275,12 +275,68 @@
   authModal.addEventListener('click', (e) => { if (e.target === authModal) closeAuthModal(); });
 
   function switchAuthTab(tab) {
-    el('#login-form').style.display = tab === 'login' ? 'block' : 'none';
-    el('#register-form').style.display = tab === 'register' ? 'block' : 'none';
-    document.querySelectorAll('.auth-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-    el('#login-error').textContent = '';
-    el('#register-error').textContent = '';
+    ['login', 'register', 'forgot', 'reset'].forEach(t => { el(`#${t}-form`).style.display = tab === t ? 'block' : 'none'; });
+    document.querySelectorAll('.auth-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab || (tab === 'forgot' && b.dataset.tab === 'login')));
+    ['login', 'register', 'forgot', 'reset'].forEach(t => { el(`#${t}-error`).textContent = ''; });
   }
+  el('#forgot-open').addEventListener('click', () => { el('#fo-email').value = el('#li-email').value; switchAuthTab('forgot'); });
+  el('#forgot-back').addEventListener('click', () => switchAuthTab('login'));
+
+  el('#forgot-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errorEl = el('#forgot-error');
+    errorEl.textContent = '';
+    const btn = e.target.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/auth/forgot', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: el('#fo-email').value.trim() })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { errorEl.textContent = data.error || 'Envoi impossible.'; return; }
+      closeAuthModal();
+      showToast(data.message || 'Email envoyé.');
+    } catch (err) {
+      errorEl.textContent = 'Erreur réseau, réessaie.';
+    } finally { btn.disabled = false; }
+  });
+
+  // Lien reçu par email : Supabase renvoie ici avec le jeton dans l'adresse (#access_token=...&type=recovery)
+  let recoveryToken = null;
+  function handleRecoveryLink() {
+    const hash = window.location.hash ? new URLSearchParams(window.location.hash.slice(1)) : null;
+    if (!hash) return;
+    if (hash.get('type') === 'recovery' && hash.get('access_token')) {
+      recoveryToken = hash.get('access_token');
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+      openAuthModal('reset');
+    } else if (hash.get('error_code') || hash.get('error')) {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+      showToast('Ce lien a expiré. Refais une demande de mot de passe oublié.');
+    }
+  }
+  el('#reset-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errorEl = el('#reset-error');
+    errorEl.textContent = '';
+    const btn = e.target.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/auth/reset', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken: recoveryToken, password: el('#rs-password').value })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { errorEl.textContent = data.error || 'Impossible de changer le mot de passe.'; return; }
+      recoveryToken = null;
+      el('#rs-password').value = '';
+      switchAuthTab('login');
+      showToast('Mot de passe modifié : tu peux te connecter.');
+    } catch (err) {
+      errorEl.textContent = 'Erreur réseau, réessaie.';
+    } finally { btn.disabled = false; }
+  });
   document.querySelectorAll('.auth-tab').forEach(b => b.addEventListener('click', () => switchAuthTab(b.dataset.tab)));
 
   el('#login-form').addEventListener('submit', async (e) => {
@@ -326,11 +382,11 @@
       });
       const data = await res.json();
       if (!res.ok) { errorEl.textContent = data.error || 'Inscription impossible.'; return; }
-      state.customer = data.customer;
-      renderAccountButton();
+      // Le compte doit d'abord être confirmé via le lien reçu par email : pas de connexion immédiate.
+      el('#li-email').value = email;
+      switchAuthTab('login');
       closeAuthModal();
-      if (drawer.classList.contains('open')) renderCartDrawer();
-      showToast(`Bienvenue, ${data.customer.name.split(' ')[0]} !`);
+      showToast(data.message || 'Compte créé ! Confirme ton email pour te connecter.');
     } catch (err) {
       errorEl.textContent = 'Erreur réseau, réessaie.';
     } finally {
@@ -363,8 +419,8 @@
     const worth = ((state.customer.points || 0) * (loyalty.pointValueCents || 0)) / 100;
     body.innerHTML = `
       <div class="account-hero">
-        <div class="acc-name">${state.customer.name}</div>
-        <div class="acc-email">${state.customer.email}</div>
+        <div class="acc-name">${escapeHtml(state.customer.name)}</div>
+        <div class="acc-email">${escapeHtml(state.customer.email)}</div>
         <div class="points-value">${state.customer.points || 0}</div>
         <div class="points-label">points de fidélité</div>
         <div class="points-worth">soit ${fmt(worth)} de réduction à utiliser</div>
@@ -555,9 +611,9 @@
     }
     container.innerHTML = items.map(p => `
       <div class="cart-item" data-id="${p.id}">
-        ${p.imageUrl ? `<img src="${p.imageUrl}" alt="${p.name}">` : `<div style="width:68px;height:88px;background:var(--paper-raised);"></div>`}
+        ${p.imageUrl ? `<img src="${p.imageUrl}" alt="${escapeHtml(p.name)}">` : `<div style="width:68px;height:88px;background:var(--paper-raised);"></div>`}
         <div class="cart-item-info">
-          <div class="name">${p.name}</div>
+          <div class="name">${escapeHtml(p.name)}</div>
           <div class="price">${fmt(p.finalPrice)}</div>
           <div class="qty-row">
             <button class="view-link">Voir la pièce</button>
@@ -595,15 +651,15 @@
     return `
       <a href="/produit/${p.slug}" class="card" data-id="${p.id}">
         <div class="card-media">
-          ${images[0] ? `<img class="img-main" src="${images[0]}" alt="${p.name}" loading="lazy">` : `<div class="placeholder">Aube</div>`}
-          ${images[1] ? `<img class="img-hover" src="${images[1]}" alt="${p.name}" loading="lazy">` : ''}
+          ${images[0] ? `<img class="img-main" src="${images[0]}" alt="${escapeHtml(p.name)}" loading="lazy">` : `<div class="placeholder">Aube</div>`}
+          ${images[1] ? `<img class="img-hover" src="${images[1]}" alt="${escapeHtml(p.name)}" loading="lazy">` : ''}
           ${!p.inStock ? '<span class="badge-out">Épuisé</span>' : (isNewProduct(p) ? '<span class="badge-new">Nouveau</span>' : '')}
           ${p.discountPercent > 0 ? `<span class="badge-discount">-${p.discountPercent}%</span>` : ''}
           <button type="button" class="card-heart ${isWishlisted(p.id) ? 'active' : ''}" data-wish="${p.id}" aria-label="Ajouter aux favoris">${isWishlisted(p.id) ? '♥' : '♡'}</button>
         </div>
         ${badgesHtml(p)}
-        ${p.category ? `<div class="card-cat">${p.category}</div>` : ''}
-        <div class="card-name">${p.name}</div>
+        ${p.category ? `<div class="card-cat">${escapeHtml(p.category)}</div>` : ''}
+        <div class="card-name">${escapeHtml(p.name)}</div>
         ${priceHtml(p)}
         ${cardSizesHtml(p)}
         ${p.inStock && p.stock <= LOW_STOCK_THRESHOLD ? `<div class="low-stock">Il reste ${p.stock} exemplaire${p.stock > 1 ? 's' : ''}</div>` : ''}
@@ -915,7 +971,7 @@
   }
   el('#info-close').addEventListener('click', () => infoModal.classList.remove('open'));
   infoModal.addEventListener('click', (e) => { if (e.target === infoModal) infoModal.classList.remove('open'); });
-  document.querySelectorAll('.footer-link').forEach(b => b.addEventListener('click', () => openInfo(b.dataset.info)));
+  document.querySelectorAll('.footer-link, .terms-line [data-info]').forEach(b => b.addEventListener('click', () => openInfo(b.dataset.info)));
 
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
@@ -1107,8 +1163,8 @@
         <div class="suggest-row">
           ${list.map(p => `
             <button type="button" class="suggest-item" data-id="${p.id}">
-              ${p.imageUrl ? `<img src="${p.imageUrl}" alt="${p.name}" loading="lazy">` : '<div class="tile-ph"></div>'}
-              <span class="suggest-name">${p.name}</span>
+              ${p.imageUrl ? `<img src="${p.imageUrl}" alt="${escapeHtml(p.name)}" loading="lazy">` : '<div class="tile-ph"></div>'}
+              <span class="suggest-name">${escapeHtml(p.name)}</span>
               <span class="suggest-price">${fmt(p.finalPrice)}</span>
             </button>
           `).join('')}
@@ -1172,9 +1228,9 @@
       if (!p) return '';
       return `
         <div class="cart-item" data-key="${key}">
-          ${p.imageUrl ? `<img src="${p.imageUrl}" alt="${p.name}">` : `<div style="width:68px;height:88px;background:var(--paper-raised);"></div>`}
+          ${p.imageUrl ? `<img src="${p.imageUrl}" alt="${escapeHtml(p.name)}">` : `<div style="width:68px;height:88px;background:var(--paper-raised);"></div>`}
           <div class="cart-item-info">
-            <div class="name">${p.name}</div>
+            <div class="name">${escapeHtml(p.name)}</div>
             ${size && size !== 'TU' ? `<div class="size-label">Taille ${size}</div>` : ''}
             <div class="price">${fmt(unitPrice(p))}</div>
             <div class="qty-row">
@@ -1255,8 +1311,8 @@
       guestFields.style.display = 'none';
       accountBox.style.display = 'block';
       accountBox.innerHTML = `
-        <div class="acc-name">Connectée en tant que ${state.customer.name}</div>
-        <div class="acc-email">${state.customer.email}</div>
+        <div class="acc-name">Connectée en tant que ${escapeHtml(state.customer.name)}</div>
+        <div class="acc-email">${escapeHtml(state.customer.email)}</div>
         <button type="button" class="acc-logout">Pas moi, changer de compte</button>
       `;
       accountBox.querySelector('.acc-logout').addEventListener('click', async () => {
@@ -1295,6 +1351,10 @@
     const errorEl = el('#checkout-error');
     errorEl.textContent = '';
 
+    if (!el('#cf-terms').checked) {
+      errorEl.textContent = "Merci d'accepter les conditions générales de vente pour commander.";
+      return;
+    }
     const address = el('#cf-address').value.trim();
     const postalCode = el('#cf-postal').value.trim();
     const city = el('#cf-city').value.trim();
@@ -1315,8 +1375,8 @@
       payload = { customer: { name, email, address, postalCode, city } };
       if (el('#cf-create-account').checked) {
         const password = el('#cf-password').value;
-        if (!password || password.length < 6) {
-          errorEl.textContent = "Choisis un mot de passe d'au moins 6 caractères pour créer ton compte.";
+        if (!password || password.length < 8) {
+          errorEl.textContent = "Choisis un mot de passe d'au moins 8 caractères pour créer ton compte.";
           return;
         }
         payload.createAccount = true;
@@ -1324,6 +1384,7 @@
       }
     }
 
+    payload.acceptTerms = true;
     if (state.promo) payload.promoCode = state.promo.code;
     if (state.config.giftNoteEnabled && el('#cf-gift').checked) {
       payload.giftNote = el('#cf-gift-note').value.trim();
@@ -1354,6 +1415,9 @@
       state.redeemPoints = false;
       state.promo = null;
       saveCart();
+      if (data.accountCreated) {
+        try { sessionStorage.setItem('aube_flash', 'Ton compte a bien été créé : clique sur le lien reçu par email pour le confirmer, puis connecte-toi pour retrouver tes points.'); } catch (e) {}
+      }
       if (!state.customer) { await loadCustomer(); }
       window.location.href = `/commande/${data.token}`;
     } catch (e) {
@@ -1393,12 +1457,16 @@
 
     state.paypalButtonsInstance = window.paypal.Buttons({
       style: { layout: 'vertical', color: 'black', shape: 'rect', label: 'pay' },
+      onClick: (data, actions) => {
+        if (!el('#cf-terms').checked) { showToast("Merci d'accepter les conditions générales de vente."); return actions.reject(); }
+        return actions.resolve();
+      },
       createOrder: async () => {
         const items = Object.keys(state.cart).map(key => {
           const [idStr, size] = key.split('::');
           return { productId: parseInt(idStr, 10), size, qty: state.cart[key] };
         });
-        const body = { items };
+        const body = { items, acceptTerms: true };
         if (state.promo) body.promoCode = state.promo.code;
         const res = await fetch('/api/paypal/create-order', {
           method: 'POST',
@@ -1524,5 +1592,8 @@
     renderWishlistCount();
     connectRealtime();
     openProductFromUrl();
+    handleRecoveryLink();
+    const q = new URLSearchParams(window.location.search);
+    if (q.get('alerte') === 'supprimee') { showToast('Tu es bien désinscrite de cette alerte.'); history.replaceState(null, '', window.location.pathname); }
   })();
 })();
