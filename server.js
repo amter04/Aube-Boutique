@@ -11,7 +11,7 @@ const session = require('express-session');
 const multer = require('multer');
 const store = require('./db/store');
 const storage = require('./db/storage');
-const { supabase } = require('./db/supabase');
+const { supabase, authClient } = require('./db/supabase');
 
 let pool = null;
 try { pool = require('./db/pool').pool || null; } catch (e) { pool = null; }
@@ -31,6 +31,7 @@ const MAX_QTY_PER_LINE = 20;
 const STAFF_SESSION_MS = 8 * 60 * 60 * 1000;          // patron / employé : 8 h
 const CUSTOMER_SESSION_MS = 30 * 24 * 60 * 60 * 1000; // cliente : 30 jours
 const STAFF_CHECK_TTL_MS = 15 * 1000;                  // un employé désactivé perd l'accès en 15 s au plus
+const RESERVATION_MS = 30 * 60 * 1000;               // stock + points réservés 30 min pendant un paiement PayPal
 const PASSWORD_MIN = 8;
 const PASSWORD_MAX = 200;
 
@@ -54,6 +55,14 @@ if (!process.env.ADMIN_PASSWORD) {
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
+
+const supaAdmin = () => {
+  if (!supabase) throw new HttpError(503, 'Les comptes sont momentanément indisponibles.');
+  return supabase;
+};
+const supaAuth = () => {
+  try { return authClient(); } catch (e) { throw new HttpError(503, 'Les comptes sont momentanément indisponibles.'); }
+};
 
 const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
@@ -599,6 +608,42 @@ function decrementStock(data, orderItems) {
   }
 }
 
+// Réservation : le stock (et les points utilisés) sont retirés dès la création de la commande
+// PayPal, puis rendus automatiquement si la commande n'est pas payée dans les 30 minutes.
+// Ça évite que deux clientes paient la dernière pièce en même temps.
+function releaseStock(data, orderItems) {
+  for (const it of orderItems || []) {
+    const product = data.products.find(p => p.id === it.productId);
+    const sizeEntry = product && (product.sizes || []).find(s => s.size === it.size);
+    if (sizeEntry) sizeEntry.stock = (sizeEntry.stock || 0) + it.qty;
+  }
+}
+function releaseReservation(data, order) {
+  if (!order.reserved) return;
+  releaseStock(data, order.items);
+  if (order.customerId && order.pointsRedeemed > 0) {
+    const account = data.customers.find(c => c.id === order.customerId);
+    if (account) account.points = (account.points || 0) + order.pointsRedeemed;
+  }
+  order.reserved = false;
+}
+async function expireStaleReservations() {
+  try {
+    const cutoff = Date.now() - RESERVATION_MS;
+    const stale = (o) => o.status === 'created' && new Date(o.createdAt).getTime() < cutoff;
+    const peek = await store.load();
+    if (!peek.orders.some(stale)) return;
+    await store.withTransaction(async (data) => {
+      for (const o of data.orders) {
+        if (!stale(o)) continue;
+        releaseReservation(data, o);
+        o.status = 'expired';
+      }
+    });
+    broadcastUpdate();
+  } catch (e) { console.error('Nettoyage des réservations échoué :', e.message); }
+}
+
 // ----- Fidélité -----
 function computeLoyaltyRedemption(customer, baseCents, requestedPoints, loyalty) {
   const minRedeem = loyalty.minRedeemPoints || 0;
@@ -634,6 +679,10 @@ function toPublicEmployee(e) { return { id: e.id, name: e.name, email: e.email, 
 function findCustomerByEmail(data, email) {
   const norm = store.normalizeEmail(email);
   return data.customers.find(c => store.normalizeEmail(c.email) === norm);
+}
+
+function requireTerms(body) {
+  if (!body || body.acceptTerms !== true) throw new HttpError(400, 'Merci d\'accepter les conditions générales de vente pour commander.');
 }
 
 function sanitizeCustomerInfo(c) {
@@ -681,10 +730,32 @@ function sendConfirmationEmail(order, email) {
   });
 }
 
+function legalConfig() {
+  const e = process.env;
+  return {
+    name: e.LEGAL_NAME || '', form: e.LEGAL_FORM || '', owner: e.LEGAL_OWNER || '', siret: e.LEGAL_SIRET || '',
+    address: e.LEGAL_ADDRESS || '', phone: e.LEGAL_PHONE || '', vat: e.LEGAL_VAT || '',
+    host: e.LEGAL_HOST || 'Render Services, Inc. — render.com',
+    mediator: e.LEGAL_MEDIATOR || '', returnCosts: e.LEGAL_RETURN_COSTS === 'shop' ? 'shop' : 'customer',
+    email: e.CONTACT_EMAIL || ''
+  };
+}
+['LEGAL_NAME', 'LEGAL_OWNER', 'LEGAL_SIRET', 'LEGAL_ADDRESS', 'CONTACT_EMAIL', 'LEGAL_MEDIATOR'].forEach((k) => {
+  if (!process.env[k]) console.warn(`⚠ ${k} n'est pas défini : les mentions légales / CGV afficheront « à compléter ».`);
+});
+
 function paymentsLive(data) {
   return !!process.env.PAYPAL_CLIENT_ID && !!process.env.PAYPAL_CLIENT_SECRET && !!data.settings.paymentsEnabled;
 }
 
+function notifyOwner(subject, html) {
+  const to = process.env.NOTIFY_EMAIL || process.env.CONTACT_EMAIL;
+  if (to) sendEmail({ to, subject, html });
+}
+hooks.on('order.paid', ({ order }) => notifyOwner(
+  `Aube — nouvelle commande n°${order.id} (${(order.totalCents / 100).toFixed(2)} €)`,
+  `<p>Nouvelle commande <strong>n°${order.id}</strong> — ${esc(order.payerName || (order.customer && order.customer.name) || '')} — <strong>${(order.totalCents / 100).toFixed(2)} €</strong>${order.source === 'test' ? ' <em>(mode test, sans paiement)</em>' : ''}.</p><p>À préparer dans l'espace équipe.</p>`
+));
 hooks.on('order.paid', ({ order }) => sendConfirmationEmail(order, order.payerEmail || (order.customer && order.customer.email)));
 
 // ======================================================================
@@ -700,8 +771,8 @@ const ctx = {
   frontend: { addScript: (p) => { if (/^\/js\/features\/[a-z0-9_-]+\.js$/i.test(p)) frontendScripts.push(p); else console.warn('Script boutique refusé :', p); } },
   email: { send: sendEmail },
   broadcast: broadcastUpdate,
-  secureToken,
-  helpers: { toAdminOrder, toPublicOrder, toPublicProduct, finalPriceCents, computeStock, audit }
+  secureToken, storage,
+  helpers: { toAdminOrder, toPublicOrder, toPublicProduct, finalPriceCents, computeStock, audit, saveProcessedImage }
 };
 
 function mountRoutes() {
@@ -716,6 +787,8 @@ function mountRoutes() {
       freeShippingThresholdCents: data.settings.freeShippingThresholdCents,
       testCheckout: !live,
       loyalty: data.settings.loyalty,
+      contactEmail: process.env.CONTACT_EMAIL || '',
+      legal: legalConfig(),
       frontendScripts
     };
     for (const fn of publicConfigExtras) {
@@ -791,7 +864,7 @@ function mountRoutes() {
     let authenticated = false;
 
     try {
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+      const { data: authData, error: authError } = await supaAuth().auth.signInWithPassword({ email, password });
       if (!authError && authData && authData.user) {
         authenticated = true;
       }
@@ -841,7 +914,7 @@ function mountRoutes() {
     if (!name || !email) throw new HttpError(400, 'Nom et email valides requis');
     const password = checkPassword(req.body.password);
 
-    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+    const { data: authData, error: authError } = await supaAdmin().auth.admin.createUser({
       email,
       password,
       email_confirm: true,
@@ -888,7 +961,7 @@ function mountRoutes() {
     });
 
     if (newPassword && employee.supabaseUid) {
-      await supabase.auth.admin.updateUserById(employee.supabaseUid, { password: newPassword });
+      await supaAdmin().auth.admin.updateUserById(employee.supabaseUid, { password: newPassword });
     }
 
     invalidateStaff(id);
@@ -905,7 +978,7 @@ function mountRoutes() {
     });
 
     if (employee && employee.supabaseUid) {
-      await supabase.auth.admin.deleteUser(employee.supabaseUid);
+      await supaAdmin().auth.admin.deleteUser(employee.supabaseUid);
     }
 
     invalidateStaff(id);
@@ -921,7 +994,7 @@ function mountRoutes() {
 
     if (!name || !email) throw new HttpError(400, 'Nom et email valides requis');
 
-    const { data: authData, error: authError } = await supabase.auth.signUp({
+    const { data: authData, error: authError } = await supaAuth().auth.signUp({
       email,
       password,
       options: {
@@ -934,6 +1007,10 @@ function mountRoutes() {
         throw new HttpError(409, 'Un compte existe déjà avec cet email.');
       }
       throw new HttpError(400, authError.message);
+    }
+
+    if (authData && authData.user && Array.isArray(authData.user.identities) && authData.user.identities.length === 0) {
+      throw new HttpError(409, 'Un compte existe déjà avec cet email. Connecte-toi, ou utilise « Mot de passe oublié ».');
     }
 
     await store.withTransaction(async (data) => {
@@ -966,7 +1043,7 @@ function mountRoutes() {
     customerLoginIpLimiter.check(req);
     customerLoginMailLimiter.check(req, email.toLowerCase());
 
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+    const { data: authData, error: authError } = await supaAuth().auth.signInWithPassword({
       email,
       password
     });
@@ -1005,6 +1082,33 @@ function mountRoutes() {
     res.json({ ok: true, customer: toPublicCustomer(customer) });
   }));
 
+  // ----- Mot de passe oublié (mail envoyé par Supabase) -----
+  const forgotLimiter = createRequestLimiter({ name: 'forgot', max: 5, windowMs: 60 * 60 * 1000 });
+  const resetLimiter = createRequestLimiter({ name: 'reset', max: 10, windowMs: 60 * 60 * 1000 });
+  const siteUrl = (req) => (process.env.PUBLIC_URL && /^https?:\/\//.test(process.env.PUBLIC_URL))
+    ? process.env.PUBLIC_URL.replace(/\/+$/, '') : `${req.protocol}://${req.get('host')}`;
+
+  app.post('/api/auth/forgot', forgotLimiter, asyncHandler(async (req, res) => {
+    const email = validEmail(req.body && req.body.email);
+    if (!email) throw new HttpError(400, 'Adresse email invalide');
+    try { await supaAuth().auth.resetPasswordForEmail(email, { redirectTo: siteUrl(req) + '/' }); }
+    catch (e) { console.warn('Mot de passe oublié :', e.message); }
+    // Même réponse que l'email existe ou non (on ne révèle pas qui a un compte).
+    res.json({ ok: true, message: 'Si un compte existe avec cette adresse, un email de réinitialisation vient de partir.' });
+  }));
+
+  app.post('/api/auth/reset', resetLimiter, asyncHandler(async (req, res) => {
+    const token = String((req.body && req.body.accessToken) || '').slice(0, 4000);
+    const password = checkPassword(req.body && req.body.password);
+    if (!token) throw new HttpError(400, 'Lien invalide ou expiré.');
+    const { data: u, error } = await supaAdmin().auth.getUser(token);
+    if (error || !u || !u.user) throw new HttpError(400, 'Lien invalide ou expiré. Refais une demande.');
+    const { error: upErr } = await supaAdmin().auth.admin.updateUserById(u.user.id, { password });
+    if (upErr) throw new HttpError(400, 'Impossible de changer le mot de passe.');
+    audit('password.reset', req, { uid: u.user.id });
+    res.json({ ok: true });
+  }));
+
   app.post('/api/auth/logout', (req, res) => {
     if (req.session) req.session.customerId = null;
     res.json({ ok: true });
@@ -1019,7 +1123,7 @@ function mountRoutes() {
 
   app.get('/api/account/orders', requireCustomer, asyncHandler(async (req, res) => {
     const data = await store.load();
-    const rows = data.orders.filter(o => o.customerId === req.session.customerId)
+    const rows = data.orders.filter(o => o.customerId === req.session.customerId && o.status !== 'expired')
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     res.json(rows.map(toPublicOrder));
   }));
@@ -1031,8 +1135,8 @@ function mountRoutes() {
     const today = new Date().toDateString();
     res.json({
       totalSales: paid.reduce((s, o) => s + o.totalCents, 0) / 100,
-      ordersCount: data.orders.length,
-      ordersToday: data.orders.filter(o => new Date(o.createdAt).toDateString() === today).length,
+      ordersCount: data.orders.filter(o => !['created', 'expired'].includes(o.status)).length,
+      ordersToday: data.orders.filter(o => !['created', 'expired'].includes(o.status) && new Date(o.createdAt).toDateString() === today).length,
       paidOrdersCount: paid.length,
       productsCount: data.products.length,
       activeProductsCount: data.products.filter(p => p.isActive).length,
@@ -1216,7 +1320,7 @@ function mountRoutes() {
   // ----- Commandes (équipe) -----
   app.get('/api/admin/orders', requireStaff, asyncHandler(async (req, res) => {
     const data = await store.load();
-    res.json([...data.orders].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(toAdminOrder));
+    res.json([...data.orders].filter(o => !['created', 'expired'].includes(o.status)).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(toAdminOrder));
   }));
 
   const FULFILLMENT_STATUSES = ['to_prepare', 'prepared', 'shipped'];
@@ -1246,7 +1350,7 @@ function mountRoutes() {
 
   app.get('/api/admin/orders/export.csv', requireAdmin, asyncHandler(async (req, res) => {
     const data = await store.load();
-    const rows = [...data.orders].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const rows = [...data.orders].filter(o => !['created', 'expired'].includes(o.status)).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     const header = ['Numero', 'Date', 'Statut', 'Mode', 'Client', 'Email', 'Adresse', 'Articles', 'Sous-total', 'Livraison', 'Total'];
     const lines = [header.map(csvCell).join(';')];
     for (const o of rows) {
@@ -1269,11 +1373,33 @@ function mountRoutes() {
   // ----- Commande SANS paiement -----
   app.post('/api/checkout/test', checkoutLimiter, asyncHandler(async (req, res) => {
     const body = req.body || {};
+    requireTerms(body);
     const customerInfo = sanitizeCustomerInfo(body.customer);
     const cart = normalizeCart(body.items);
     const sessionCustomerId = req.session && req.session.customerId;
     const createAccount = !!body.createAccount && !sessionCustomerId;
     const newPassword = createAccount ? checkPassword(body.password) : null;
+
+    let supabaseUid = null;
+    if (createAccount) {
+      const pre = await store.load();
+      if (paymentsLive(pre)) throw new HttpError(403, 'Les commandes de test sont désactivées. Utilise le paiement.');
+      if (findCustomerByEmail(pre, customerInfo.email)) throw new HttpError(409, 'Un compte existe deja avec cet email. Connecte-toi pour continuer.');
+      // Vrai compte Supabase Auth (sinon la cliente ne pourrait jamais se reconnecter).
+      // Supabase envoie le mail de confirmation : on ne connecte donc PAS la cliente tout de suite.
+      const { data: authData, error: authError } = await supaAuth().auth.signUp({
+        email: customerInfo.email, password: newPassword,
+        options: { data: { name: customerInfo.name, role: 'customer' } }
+      });
+      if (authError) {
+        if (/already registered/i.test(authError.message)) throw new HttpError(409, 'Un compte existe deja avec cet email. Connecte-toi pour continuer.');
+        throw new HttpError(400, authError.message);
+      }
+      if (authData && authData.user && Array.isArray(authData.user.identities) && authData.user.identities.length === 0) {
+        throw new HttpError(409, 'Un compte existe deja avec cet email. Connecte-toi pour continuer.');
+      }
+      supabaseUid = authData && authData.user ? authData.user.id : null;
+    }
 
     const result = await store.withTransaction(async (data) => {
       if (paymentsLive(data)) throw new HttpError(403, 'Les commandes de test sont désactivées. Utilise le paiement.');
@@ -1284,6 +1410,7 @@ function mountRoutes() {
         if (findCustomerByEmail(data, customerInfo.email)) throw new HttpError(409, 'Un compte existe deja avec cet email. Connecte-toi pour continuer.');
         account = {
           id: data.nextCustomerId++,
+          supabaseUid,
           name: customerInfo.name,
           email: store.normalizeEmail(customerInfo.email),
           points: 0,
@@ -1303,7 +1430,7 @@ function mountRoutes() {
         items: priced.orderItems, customerId: account ? account.id : null,
         pointsRedeemed: priced.pointsRedeemed, pointsEarned,
         customer: customerInfo, payerName: customerInfo.name, payerEmail: customerInfo.email,
-        fulfillmentStatus: 'to_prepare', ext, createdAt: new Date().toISOString()
+        fulfillmentStatus: 'to_prepare', ext, termsAcceptedAt: new Date().toISOString(), createdAt: new Date().toISOString()
       };
       if (account) account.points = Math.max(0, (account.points || 0) - priced.pointsRedeemed) + pointsEarned;
       decrementStock(data, order.items);
@@ -1313,13 +1440,13 @@ function mountRoutes() {
     });
 
     broadcastUpdate();
-    if (result.newAccount) await establishSession(req, { customerId: result.account.id }, CUSTOMER_SESSION_MS);
     hooks.emit('order.created', { order: result.order });
     hooks.emit('order.paid', { order: result.order });
     res.json({
       ok: true, orderId: result.order.id, token: result.order.token,
       pointsEarned: result.order.pointsEarned, pointsRedeemed: result.order.pointsRedeemed,
-      pointsBalance: result.account ? result.account.points : null
+      pointsBalance: result.account ? result.account.points : null,
+      accountCreated: !!result.newAccount
     });
   }));
 
@@ -1339,6 +1466,7 @@ function mountRoutes() {
 
   app.post('/api/paypal/create-order', paypalLimiter, asyncHandler(async (req, res) => {
     const body = req.body || {};
+    requireTerms(body);
     const cart = normalizeCart(body.items);
     const readData = await store.load();
     if (!paymentsLive(readData)) throw new HttpError(403, 'Les paiements ne sont pas activés.');
@@ -1369,15 +1497,25 @@ function mountRoutes() {
     const paypalOrder = await resp.json();
     if (!resp.ok) { console.error('PayPal create-order:', JSON.stringify(paypalOrder).slice(0, 500)); throw new HttpError(502, 'Le paiement est momentanément indisponible.'); }
 
+    // Dans la transaction (verrou Postgres) : on recalcule tout avec les données à jour, on
+    // vérifie que le montant envoyé à PayPal est identique, puis on RÉSERVE le stock et les points.
     await store.withTransaction(async (data) => {
+      const acc = customerId ? data.customers.find(c => c.id === customerId) || null : null;
+      const fresh = await priceOrder(data, { cart, account: acc, redeemPoints: body.redeemPoints, body });
+      if (fresh.totalCents !== priced.totalCents) {
+        throw new HttpError(409, 'Ton panier a changé (prix, stock ou points). Recharge la page et réessaie.');
+      }
+      decrementStock(data, fresh.orderItems);
+      if (acc && fresh.pointsRedeemed > 0) acc.points = Math.max(0, (acc.points || 0) - fresh.pointsRedeemed);
       const ext = await buildOrderExtras(body, data);
       data.orders.push({
         id: data.nextOrderId++, token: secureToken(24), source: 'paypal', paypalOrderId: paypalOrder.id, status: 'created',
-        subtotalCents: priced.subtotalCents, shippingCents: priced.shippingCents,
-        discountCents: priced.discountCents, adjustments: priced.adjustments, totalCents: priced.totalCents,
-        items: priced.orderItems, customerId: account ? account.id : null,
-        pointsRedeemed: priced.pointsRedeemed, pointsEarned: 0,
-        payerName: '', payerEmail: '', fulfillmentStatus: 'to_prepare', ext, createdAt: new Date().toISOString()
+        subtotalCents: fresh.subtotalCents, shippingCents: fresh.shippingCents,
+        discountCents: fresh.discountCents, adjustments: fresh.adjustments, totalCents: fresh.totalCents,
+        items: fresh.orderItems, customerId: acc ? acc.id : null,
+        pointsRedeemed: fresh.pointsRedeemed, pointsEarned: 0, reserved: true,
+        payerName: '', payerEmail: '', fulfillmentStatus: 'to_prepare', ext,
+        termsAcceptedAt: new Date().toISOString(), createdAt: new Date().toISOString()
       });
     });
     res.json({ id: paypalOrder.id });
@@ -1430,17 +1568,22 @@ function mountRoutes() {
 
       if (!amountOk) {
         order.status = completed ? 'review' : String(capture.status || 'failed').toLowerCase().slice(0, 20);
+        if (!completed) releaseReservation(data, order); // rien n'a été encaissé : on rend stock et points
         if (completed) console.error(`⚠ Montant PayPal incohérent pour la commande ${order.id} : attendu ${order.totalCents}, reçu ${paidCents}`);
         return { order, newlyPaid: false };
       }
 
       order.status = 'paid';
-      decrementStock(data, order.items);
+      // Stock et points ont normalement déjà été réservés à la création ; le repli (order.reserved
+      // faux) couvre une réservation expirée entre-temps ou une ancienne commande.
+      const wasReserved = !!order.reserved;
+      if (!wasReserved) decrementStock(data, order.items);
+      order.reserved = false;
       if (order.customerId) {
         const account = data.customers.find(c => c.id === order.customerId);
         if (account) {
           const earned = computeLoyaltyEarnings((order.subtotalCents || 0) - (order.discountCents || 0), data.settings.loyalty);
-          account.points = Math.max(0, (account.points || 0) - (order.pointsRedeemed || 0)) + earned;
+          account.points = (wasReserved ? (account.points || 0) : Math.max(0, (account.points || 0) - (order.pointsRedeemed || 0))) + earned;
           order.pointsEarned = earned;
         }
       }
@@ -1449,6 +1592,10 @@ function mountRoutes() {
     });
 
     if (!out) throw new HttpError(404, 'Commande introuvable');
+    if (out.order.status === 'review') {
+      notifyOwner(`⚠ Aube — commande n°${out.order.id} à vérifier`,
+        `<p>Le paiement PayPal de la commande <strong>n°${out.order.id}</strong> a été encaissé mais le montant ne correspond pas à celui attendu. Vérifie-la dans PayPal et dans l'admin avant d'expédier.</p>`);
+    }
     if (out.newlyPaid) {
       broadcastUpdate();
       hooks.emit('order.created', { order: out.order });
@@ -1459,6 +1606,20 @@ function mountRoutes() {
 
   // ----- Options (dossier features/) -----
   loadFeatures();
+
+  // ----- SEO -----
+  const baseUrl = (req) => (process.env.PUBLIC_URL && /^https?:\/\//.test(process.env.PUBLIC_URL))
+    ? process.env.PUBLIC_URL.replace(/\/+$/, '') : `${req.protocol}://${req.get('host')}`;
+  app.get('/robots.txt', (req, res) => {
+    res.type('text/plain').send(`User-agent: *\nDisallow: /admin\nDisallow: /equipe\nDisallow: /api/\nDisallow: /commande/\n\nSitemap: ${baseUrl(req)}/sitemap.xml\n`);
+  });
+  app.get('/sitemap.xml', asyncHandler(async (req, res) => {
+    const data = await store.load();
+    const base = baseUrl(req);
+    const urls = ['/', ...data.products.filter(p => p.isActive).map(p => `/produit/${productSlug(p)}`)];
+    res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map(u => `  <url><loc>${esc(base + u)}</loc></url>`).join('\n')}\n</urlset>\n`);
+  }));
+  app.get('/favicon.ico', (req, res) => res.redirect(301, '/favicon.svg'));
 
   // ----- Pages -----
   app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
@@ -1511,6 +1672,8 @@ async function start() {
     cookie: { httpOnly: true, sameSite: 'lax', secure: 'auto', maxAge: CUSTOMER_SESSION_MS }
   }));
   mountRoutes();
+  expireStaleReservations();
+  setInterval(expireStaleReservations, 5 * 60 * 1000).unref();
   return app.listen(PORT, () => console.log(`Aube boutique lancee sur http://localhost:${PORT}`));
 }
 
