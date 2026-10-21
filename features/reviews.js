@@ -6,7 +6,8 @@ const multer = require('multer');
 
 module.exports = {
   register(ctx) {
-    const { app, store, storage, HttpError, asyncHandler, requireAdmin, requireCustomer, helpers } = ctx;
+    const { app, store, HttpError, asyncHandler, requireAdmin, requireCustomer, helpers } = ctx;
+    const reviewLimiter = ctx.limiters.request({ name: 'review', max: 10, windowMs: 60 * 60 * 1000 });
 
     // Configuration de Multer pour la photo de l'avis
     const upload = multer({
@@ -46,7 +47,7 @@ module.exports = {
     }));
 
     // ----- CLIENTE : Déposer un avis vérifié -----
-    app.post('/api/products/:id/reviews', requireCustomer, upload.single('image'), asyncHandler(async (req, res) => {
+    app.post('/api/products/:id/reviews', requireCustomer, reviewLimiter, upload.single('image'), asyncHandler(async (req, res) => {
       const productId = ctx.validate.parseId(req.params.id);
       const customerId = req.session.customerId;
       const rating = ctx.validate.intInRange(req.body.rating, 1, 5, 0);
@@ -67,18 +68,15 @@ module.exports = {
       if (!verifiedPurchase) {
         throw new HttpError(403, 'Avis réservé aux clientes ayant déjà acheté ce produit.');
       }
+      if ((data.reviews || []).some(r => r.productId === productId && r.customerId === customerId && r.status !== 'rejected')) {
+        throw new HttpError(409, 'Tu as déjà donné ton avis sur cette pièce.');
+      }
 
       // 2. Traitement de la photo portée (si présente)
+      // saveProcessedImage vérifie que c'est bien une image (octets réels, pas juste l'en-tête
+      // déclaré), la redimensionne/compresse puis l'envoie dans Supabase Storage.
       let imageUrl = null;
-      if (req.file) {
-        const baseName = `review-${Date.now()}-${ctx.secureToken(8)}`;
-        if (storage.USE_SUPABASE_STORAGE) {
-          imageUrl = await storage.uploadToSupabase(req.file.buffer, `${baseName}.jpg`);
-        } else {
-          // Traitement local ou Sharp si disponible
-          imageUrl = await ctx.helpers.saveProcessedImage ? ctx.helpers.saveProcessedImage(req.file.buffer) : null;
-        }
-      }
+      if (req.file) imageUrl = await helpers.saveProcessedImage(req.file.buffer);
 
       const customer = data.customers.find(c => c.id === customerId);
 
