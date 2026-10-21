@@ -15,6 +15,12 @@ create table if not exists store (
   constraint store_singleton check (id = 1)
 );
 
+-- Securite : on active la Row Level Security SANS aucune policy. Resultat : la table n'est
+-- accessible ni en lecture ni en ecriture via l'API publique de Supabase (cle anon), meme si
+-- cette cle fuite un jour. Le serveur de la boutique utilise la connexion Postgres directe
+-- (DATABASE_URL), qui n'est pas concernee par la RLS.
+alter table store enable row level security;
+
 -- Ligne initiale (uniquement si la table est vide) : reprend les valeurs par defaut
 -- historiques du site (frais de port 4,90 EUR, offerts des 50 EUR, mode test actif).
 insert into store (id, data)
