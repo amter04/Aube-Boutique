@@ -1368,3 +1368,11 @@ h1, h2, h3, .display, .logo, .footer-logo, .related h4, .tile-label, .countdown 
 /* Pied de page */
 .site-footer { background: #fff; border-top: 0; border-radius: 32px 32px 0 0; margin-top: 64px; }
 .footer-bottom { border-top-color: var(--line); }
+
+/* Textes légaux */
+.info-body h4 { margin: 18px 0 6px; font-size: 15px; }
+.info-body p { margin: 0 0 10px; line-height: 1.55; }
+mark.todo { background: #FFE9A8; color: #6a4b00; padding: 0 4px; border-radius: 3px; }
+.terms-line { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; margin: 12px 0; line-height: 1.4; }
+.terms-line input { margin-top: 3px; }
+.terms-line .link-btn { display: inline; padding: 0; text-decoration: underline; }
