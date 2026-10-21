@@ -6,6 +6,11 @@
 <title>Aube — Vêtements pour femme</title>
 <meta name="description" content="Aube, une garde-robe pensée pour durer. Pièces intemporelles pour femme, livrées chez vous.">
 <link rel="stylesheet" href="/css/style.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Aube">
+<meta property="og:title" content="Aube — Vêtements pour femme">
+<meta property="og:description" content="Aube, une garde-robe pensée pour durer. Pièces intemporelles pour femme, livrées chez vous.">
 </head>
 <body>
 
@@ -206,6 +211,10 @@
     <div class="cart-total-row"><span>Total</span><span id="cart-total">0,00&nbsp;€</span></div>
 
     <div id="checkout-area">
+      <label class="terms-line">
+        <input type="checkbox" id="cf-terms">
+        <span>J'ai lu et j'accepte les <button type="button" class="link-btn" data-info="cgv">conditions générales de vente</button> et la <button type="button" class="link-btn" data-info="confidentialite">politique de confidentialité</button>.</span>
+      </label>
       <div id="test-checkout-form" style="display:none;">
         <p class="test-mode-note">🧪 Mode test — aucun paiement réel n'est demandé pour l'instant. La commande est enregistrée normalement pour que tu puisses tester le tunnel d'achat.</p>
         <div id="checkout-account-box" class="account-box" style="display:none;"></div>
@@ -219,7 +228,7 @@
           </label>
           <div class="field" id="checkout-create-password-field" style="display:none;">
             <label for="cf-password">Choisis un mot de passe</label>
-            <input type="password" id="cf-password" minlength="6">
+            <input type="password" id="cf-password" minlength="8">
           </div>
           <p class="hint">Déjà cliente ? <button type="button" class="link-btn" id="checkout-open-login">Se connecter</button> pour gagner des points sur cette commande.</p>
         </div>
@@ -285,11 +294,25 @@
         <div class="field"><label for="li-password">Mot de passe</label><input type="password" id="li-password" required></div>
         <p class="error-text" id="login-error"></p>
         <button type="submit" class="btn wine" style="width:100%; justify-content:center;">Se connecter</button>
+        <p class="hint"><button type="button" class="link-btn" id="forgot-open">Mot de passe oublié ?</button></p>
+      </form>
+      <form id="forgot-form" class="auth-form" style="display:none;">
+        <p class="hint">Entre ton email : on t'envoie un lien pour choisir un nouveau mot de passe.</p>
+        <div class="field"><label for="fo-email">Email</label><input type="email" id="fo-email" required></div>
+        <p class="error-text" id="forgot-error"></p>
+        <button type="submit" class="btn wine" style="width:100%; justify-content:center;">Envoyer le lien</button>
+        <p class="hint"><button type="button" class="link-btn" id="forgot-back">Retour à la connexion</button></p>
+      </form>
+      <form id="reset-form" class="auth-form" style="display:none;">
+        <p class="hint">Choisis ton nouveau mot de passe.</p>
+        <div class="field"><label for="rs-password">Nouveau mot de passe (8 caractères min.)</label><input type="password" id="rs-password" minlength="8" required></div>
+        <p class="error-text" id="reset-error"></p>
+        <button type="submit" class="btn wine" style="width:100%; justify-content:center;">Enregistrer</button>
       </form>
       <form id="register-form" class="auth-form" style="display:none;">
         <div class="field"><label for="re-name">Nom complet</label><input type="text" id="re-name" required></div>
         <div class="field"><label for="re-email">Email</label><input type="email" id="re-email" required></div>
-        <div class="field"><label for="re-password">Mot de passe (6 caractères min.)</label><input type="password" id="re-password" minlength="6" required></div>
+        <div class="field"><label for="re-password">Mot de passe (8 caractères min.)</label><input type="password" id="re-password" minlength="8" required></div>
         <p class="error-text" id="register-error"></p>
         <button type="submit" class="btn wine" style="width:100%; justify-content:center;">Créer mon compte</button>
       </form>
@@ -432,6 +455,7 @@
 
 <div class="toast" id="toast"></div>
 
+<script src="/js/legal.js"></script>
 <script src="/js/app.js"></script>
 </body>
 </html>
