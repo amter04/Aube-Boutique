@@ -13,6 +13,9 @@ module.exports = {
   register(ctx) {
     const { app, store, HttpError, asyncHandler, hooks, publicConfig, email, validate } = ctx;
     const { validEmail, parseId, clean, esc } = validate;
+    const alertLimiter = ctx.limiters.request({ name: 'stock-alert', max: 10, windowMs: 60 * 60 * 1000 });
+    const MAX_ALERTS = 5000;
+    const baseUrl = () => (process.env.PUBLIC_URL || '').replace(/\/+$/, '');
 
     // ----- 1. ANNONCER L'OPTION À LA BOUTIQUE -----
     publicConfig.add(async () => {
@@ -27,7 +30,7 @@ module.exports = {
     }
 
     // ----- 2. ROUTE PUBLIQUE : INSCRIPTION À UNE ALERTE -----
-    app.post('/api/stock-alerts', asyncHandler(async (req, res) => {
+    app.post('/api/stock-alerts', alertLimiter, asyncHandler(async (req, res) => {
       const { productId, size, email: mailInput } = req.body || {};
       const id = parseId(productId);
       const mail = validEmail(mailInput);
@@ -42,11 +45,12 @@ module.exports = {
 
       await store.withTransaction(async (dbData) => {
         const alerts = await getAlerts(dbData);
+        if (alerts.length >= MAX_ALERTS) throw new HttpError(503, 'Les alertes sont momentanément indisponibles.');
         // Évite les doublons d'inscription
         const exists = alerts.some(a => a.productId === id && a.size === cleanSize && a.email === mail);
         if (!exists) {
           alerts.push({
-            id: Date.now(),
+            id: ctx.secureToken(16), // sert aussi de jeton de désinscription
             productId: id,
             size: cleanSize,
             email: mail,
@@ -56,6 +60,16 @@ module.exports = {
       });
 
       res.json({ ok: true, message: 'Inscription enregistrée !' });
+    }));
+
+    // Désinscription en un clic (lien présent dans chaque email)
+    app.get('/api/stock-alerts/unsubscribe/:token', asyncHandler(async (req, res) => {
+      const token = String(req.params.token || '').slice(0, 64);
+      await store.withTransaction(async (dbData) => {
+        const alerts = await getAlerts(dbData);
+        dbData.ext.stockAlerts = alerts.filter(a => String(a.id) !== token);
+      });
+      res.redirect('/?alerte=supprimee');
     }));
 
     // ----- 3. ÉVÉNEMENT : DÉTECTION DU RÉASSORT & ENVOI D'EMAILS -----
@@ -91,7 +105,7 @@ module.exports = {
               <h2>De nouveau disponible !</h2>
               <p>La pièce <strong>${esc(product.name)}</strong> (Taille ${esc(alert.size)}) que vous attendiez est de nouveau en stock.</p>
               <p><a href="${esc(productUrl)}" style="display:inline-block; padding:10px 18px; background:#800020; color:#fff; text-decoration:none; border-radius:4px;">Voir la pièce</a></p>
-              <p style="font-size:12px; color:#777;">Vous recevez cet email car vous vous êtes inscrite à une alerte sur notre boutique.</p>
+              <p style="font-size:12px; color:#777;">Vous recevez cet email car vous vous êtes inscrite à une alerte sur notre boutique. <a href="${esc(baseUrl() + '/api/stock-alerts/unsubscribe/' + alert.id)}">Me désinscrire</a>.</p>
             </div>`
           });
         }
