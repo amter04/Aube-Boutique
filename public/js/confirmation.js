@@ -1,6 +1,9 @@
 (() => {
   const fmt = (n) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
   const main = document.getElementById('confirm-main');
+  const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  let flash = '';
+  try { flash = sessionStorage.getItem('aube_flash') || ''; sessionStorage.removeItem('aube_flash'); } catch (e) {}
 
   function tokenFromUrl() {
     const parts = window.location.pathname.split('/').filter(Boolean);
@@ -23,21 +26,21 @@
       ${isTest ? `<div class="test-banner">🧪 Commande passée en mode test — aucun paiement réel n'a été effectué.</div>` : ''}
       <div class="confirm-check">✓</div>
       <h1 style="font-size:30px; margin-bottom:6px;">Commande confirmée</h1>
-      <p style="color:#6B655D;">Merci ${o.payerName ? o.payerName.split(' ')[0] : ''} ! Un récapitulatif a été envoyé par email si une adresse a été renseignée.</p>
+      <p style="color:#6B655D;">Merci ${o.payerName ? esc(o.payerName.split(' ')[0]) : ''} ! Un récapitulatif a été envoyé par email si une adresse a été renseignée.</p>
 
       <div class="confirm-card">
         <div class="confirm-row"><span>Numéro de commande</span><strong>#${o.id}</strong></div>
         <div class="confirm-row"><span>Date</span><span>${new Date(o.createdAt).toLocaleString('fr-FR')}</span></div>
         <div class="confirm-row"><span>Statut</span><span>${o.status === 'paid' ? 'Confirmée' : o.status}</span></div>
-        ${o.payerEmail ? `<div class="confirm-row"><span>Email</span><span>${o.payerEmail}</span></div>` : ''}
-        ${o.customer && o.customer.address ? `<div class="confirm-row"><span>Adresse de livraison</span><span>${o.customer.address}, ${o.customer.postalCode || ''} ${o.customer.city || ''}</span></div>` : ''}
+        ${o.payerEmail ? `<div class="confirm-row"><span>Email</span><span>${esc(o.payerEmail)}</span></div>` : ''}
+        ${o.customer && o.customer.address ? `<div class="confirm-row"><span>Adresse de livraison</span><span>${esc(o.customer.address)}, ${esc(o.customer.postalCode || '')} ${esc(o.customer.city || '')}</span></div>` : ''}
       </div>
 
       <div class="confirm-card confirm-items">
         <h3 style="font-size:16px; margin-bottom:10px;">Articles</h3>
         ${o.items.map(it => `
           <div class="item-line">
-            <span>${it.name}${it.size && it.size !== 'TU' ? ` — taille ${it.size}` : ''} × ${it.qty}</span>
+            <span>${esc(it.name)}${it.size && it.size !== 'TU' ? ` — taille ${esc(it.size)}` : ''} × ${it.qty}</span>
             <span>${fmt(it.priceCents * it.qty / 100)}</span>
           </div>
         `).join('')}
@@ -57,6 +60,7 @@
         </div>
       ` : ''}
 
+      ${flash ? `<div class="confirm-card"><p style="margin:0;">${esc(flash)}</p></div>` : ''}
       <a href="/" class="btn wine" style="margin-top:28px;">Continuer mes achats</a>
     `;
   }
