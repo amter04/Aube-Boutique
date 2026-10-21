@@ -16,6 +16,13 @@ module.exports = {
   register(ctx) {
     const { app, store, HttpError, asyncHandler, requireAdmin, validate, pricing, hooks, publicConfig } = ctx;
     const { clean, intInRange, parseId } = validate;
+    const promoLimiter = ctx.limiters.request({ name: 'promo-validate', max: 30, windowMs: 10 * 60 * 1000 });
+    const safeDate = (v) => {
+      if (!v) return null;
+      const d = new Date(v);
+      if (Number.isNaN(d.getTime())) throw new HttpError(400, 'Date invalide.');
+      return d.toISOString();
+    };
 
     // ----- 1. INITIALISATION DE LA BASE -----
     // S'assure que la structure des codes promo existe dans les données du store
@@ -95,7 +102,7 @@ module.exports = {
     });
 
     // ----- 5. ROUTE PUBLIQUE : VALIDATION DU CODE PROMO AU CHECKOUT -----
-    app.post('/api/promo/validate', asyncHandler(async (req, res) => {
+    app.post('/api/promo/validate', promoLimiter, asyncHandler(async (req, res) => {
       const { code, subtotalCents } = req.body || {};
       if (!code) throw new HttpError(400, 'Code requis.');
 
@@ -152,10 +159,10 @@ module.exports = {
       const value = type === 'percent' ? intInRange(b.value, 1, 100, 10) : Number(b.value) || 0;
       if (value <= 0) throw new HttpError(400, 'Valeur de réduction invalide.');
 
-      const minSubtotalCents = b.minSubtotal ? Math.round(parseFloat(b.minSubtotal) * 100) : null;
+      const minSubtotalCents = b.minSubtotal && Number.isFinite(parseFloat(b.minSubtotal)) ? Math.max(0, Math.round(parseFloat(b.minSubtotal) * 100)) : null;
       const maxUses = b.maxUses ? intInRange(b.maxUses, 1, 1000000, 100) : null;
-      const startsAt = b.startsAt ? new Date(b.startsAt).toISOString() : null;
-      const endsAt = b.endsAt ? new Date(b.endsAt).toISOString() : null;
+      const startsAt = safeDate(b.startsAt);
+      const endsAt = safeDate(b.endsAt);
 
       const newPromo = await store.withTransaction(async (data) => {
         const promos = await getPromos(data);
