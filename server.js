@@ -108,10 +108,30 @@ function csvCell(v) {
   return `"${s.replace(/"/g, '""')}"`;
 }
 
-function parseColors(raw) {
+// Les couleurs sont saisies en texte : "Écru, Noir=#111111, Bordeaux". Le "=#hex" est optionnel
+// (sinon la boutique devine la teinte d'après le nom). On retire "::" des noms (séparateur des clés du panier).
+const COLOR_MAX = 12;
+function splitColorTokens(raw) {
   if (!raw) return [];
-  if (Array.isArray(raw)) return raw.map(c => clean(c, 40)).filter(Boolean);
-  return String(raw).split(',').map(c => clean(c, 40)).filter(Boolean);
+  const list = Array.isArray(raw) ? raw : String(raw).split(',');
+  const out = [];
+  const seen = new Set();
+  for (const tok of list) {
+    const [namePart, hexPart] = String(tok).split('=');
+    const name = clean(namePart, 40).replace(/::/g, ' ').trim();
+    if (!name || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    const hex = hexPart && /^#[0-9a-fA-F]{6}$/.test(hexPart.trim()) ? hexPart.trim().toLowerCase() : '';
+    out.push({ name, hex });
+    if (out.length >= COLOR_MAX) break;
+  }
+  return out;
+}
+function parseColors(raw) { return splitColorTokens(raw).map(c => c.name); }
+function parseColorHex(raw) {
+  const map = {};
+  for (const c of splitColorTokens(raw)) if (c.hex) map[c.name] = c.hex;
+  return map;
 }
 
 function audit(event, req, extra) {
@@ -470,11 +490,11 @@ function toPublicProduct(p) {
   const stock = computeStock(p);
   const images = productImages(p);
   return {
-    id: p.id, slug: productSlug(p), reference: p.reference || '', name: p.name, colors: p.colors || [], description: p.description, category: p.category,
+    id: p.id, slug: productSlug(p), reference: p.reference || '', name: p.name, colors: p.colors || [], colorHex: p.colorHex || {}, description: p.description, category: p.category,
     images, imageUrl: images[0] || '',
     price: p.priceCents / 100, finalPrice: finalPriceCents(p) / 100, discountPercent: p.discountPercent || 0,
     badges: p.badges || [], flashEndsAt: p.flashEndsAt || null,
-    sizes: (p.sizes || []).map(s => ({ size: s.size, stock: s.stock, inStock: s.stock > 0 })),
+    sizes: (p.sizes || []).map(s => ({ size: s.size, color: s.color || '', stock: s.stock, inStock: s.stock > 0 })),
     inStock: stock > 0, stock, createdAt: p.createdAt,
     ...(p.ext && p.ext.public ? p.ext.public : {})
   };
@@ -482,25 +502,45 @@ function toPublicProduct(p) {
 
 function toAdminProduct(p) {
   return {
-    id: p.id, reference: p.reference || '', name: p.name, colors: p.colors || [], description: p.description, price: p.priceCents / 100, category: p.category,
+    id: p.id, reference: p.reference || '', name: p.name, colors: p.colors || [], colorHex: p.colorHex || {}, description: p.description, price: p.priceCents / 100, category: p.category,
     images: productImages(p), sizes: p.sizes || [], stock: computeStock(p), badges: p.badges || [],
     discountPercent: p.discountPercent || 0, flashEndsAt: p.flashEndsAt || null, isActive: !!p.isActive
   };
 }
 
-function parseSizes(raw) {
+// `colors` = liste des couleurs du produit. Si elle est vide, tout est sans couleur (color ''),
+// sinon chaque ligne de stock doit viser une couleur de la liste.
+function parseSizes(raw, colors) {
   let arr;
   try { arr = JSON.parse(raw || '[]'); } catch (e) { throw new HttpError(400, 'Tailles invalides'); }
   if (!Array.isArray(arr)) throw new HttpError(400, 'Tailles invalides');
+  const palette = colors || [];
   const seen = new Set();
   const out = [];
-  for (const s of arr.slice(0, 30)) {
+  for (const s of arr.slice(0, 300)) {
     const size = clean(s && s.size, 10);
-    if (!/^[A-Za-z0-9\/.\- ]{1,10}$/.test(size) || seen.has(size)) continue;
-    seen.add(size);
-    out.push({ size, stock: intInRange(s.stock, 0, 100000, 0) });
+    if (!/^[A-Za-z0-9\/.\- ]{1,10}$/.test(size)) continue;
+    let color = '';
+    if (palette.length) {
+      color = clean(s && s.color, 40).replace(/::/g, ' ').trim();
+      if (!palette.includes(color)) continue;
+    }
+    const key = `${color}::${size}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ size, color, stock: intInRange(s.stock, 0, 100000, 0) });
   }
   return out;
+}
+
+// Retrouve la ligne de stock d'une variante (taille + couleur). Les anciens produits dont le stock
+// n'a pas de couleur (color '') servent de repli : leur stock est alors partagé entre les couleurs.
+function findVariant(product, size, color) {
+  const list = product.sizes || [];
+  const c = color || '';
+  return list.find(s => s.size === size && (s.color || '') === c)
+    || list.find(s => s.size === size && !s.color && (product.colors || []).length > 0)
+    || null;
 }
 
 function parseBadges(raw) {
@@ -556,7 +596,7 @@ function toPublicOrder(o) {
     total: o.totalCents / 100,
     subtotal: (o.subtotalCents != null ? o.subtotalCents : o.totalCents) / 100,
     shipping: (o.shippingCents || 0) / 100, discount: (o.discountCents || 0) / 100,
-    items: (o.items || []).map(i => ({ productId: i.productId, size: i.size, name: i.name, qty: i.qty, priceCents: i.priceCents })),
+    items: (o.items || []).map(i => ({ productId: i.productId, size: i.size, color: i.color || '', name: i.name, qty: i.qty, priceCents: i.priceCents })),
     payerName: o.payerName || (o.customer && o.customer.name) || '',
     payerEmail: o.payerEmail || (o.customer && o.customer.email) || '',
     customer: o.customer || null,
@@ -574,11 +614,12 @@ function normalizeCart(items) {
   for (const it of items) {
     const productId = parseInt(it && it.productId, 10);
     const size = clean(it && it.size, 10);
+    const color = clean(it && it.color, 40).replace(/::/g, ' ').trim();
     if (!Number.isInteger(productId) || !size) throw new HttpError(400, 'Panier invalide');
     const qty = intInRange(it.qty, 1, MAX_QTY_PER_LINE, 1);
-    const key = `${productId}::${size}`;
+    const key = `${productId}::${size}::${color}`;
     const prev = merged.get(key);
-    merged.set(key, { productId, size, qty: Math.min(MAX_QTY_PER_LINE, (prev ? prev.qty : 0) + qty) });
+    merged.set(key, { productId, size, color, qty: Math.min(MAX_QTY_PER_LINE, (prev ? prev.qty : 0) + qty) });
   }
   return [...merged.values()];
 }
@@ -589,12 +630,20 @@ function buildOrderFromCart(data, cart) {
   for (const item of cart) {
     const product = data.products.find(p => p.id === item.productId && p.isActive);
     if (!product) throw new HttpError(400, 'Un produit de ton panier n\'est plus disponible.');
-    const sizeEntry = (product.sizes || []).find(s => s.size === item.size);
+    const hasColors = (product.colors || []).length > 0;
+    let color = '';
+    if (hasColors) {
+      if (!item.color) throw new HttpError(400, `Choisis une couleur pour "${product.name}"`);
+      if (!product.colors.includes(item.color)) throw new HttpError(400, `Couleur indisponible pour "${product.name}"`);
+      color = item.color;
+    }
+    const sizeEntry = findVariant(product, item.size, color);
     if (!sizeEntry) throw new HttpError(400, `Taille indisponible pour "${product.name}"`);
-    if (sizeEntry.stock < item.qty) throw new HttpError(400, `Stock insuffisant pour "${product.name}" (${item.size})`);
+    const label = color ? `${color}, ${item.size}` : item.size;
+    if (sizeEntry.stock < item.qty) throw new HttpError(400, `Stock insuffisant pour "${product.name}" (${label})`);
     const unitCents = finalPriceCents(product);
     subtotalCents += unitCents * item.qty;
-    orderItems.push({ productId: product.id, size: item.size, name: product.name, qty: item.qty, priceCents: unitCents });
+    orderItems.push({ productId: product.id, size: item.size, color, name: product.name, qty: item.qty, priceCents: unitCents });
   }
   const shippingCents = shippingForSubtotal(data.settings, subtotalCents);
   return { orderItems, subtotalCents, shippingCents };
@@ -603,7 +652,7 @@ function buildOrderFromCart(data, cart) {
 function decrementStock(data, orderItems) {
   for (const it of orderItems) {
     const product = data.products.find(p => p.id === it.productId);
-    const sizeEntry = product && (product.sizes || []).find(s => s.size === it.size);
+    const sizeEntry = product && findVariant(product, it.size, it.color);
     if (sizeEntry) sizeEntry.stock = Math.max(0, sizeEntry.stock - it.qty);
   }
 }
@@ -614,7 +663,7 @@ function decrementStock(data, orderItems) {
 function releaseStock(data, orderItems) {
   for (const it of orderItems || []) {
     const product = data.products.find(p => p.id === it.productId);
-    const sizeEntry = product && (product.sizes || []).find(s => s.size === it.size);
+    const sizeEntry = product && findVariant(product, it.size, it.color);
     if (sizeEntry) sizeEntry.stock = (sizeEntry.stock || 0) + it.qty;
   }
 }
@@ -714,7 +763,7 @@ async function sendEmail({ to, subject, html }) {
 function sendConfirmationEmail(order, email) {
   if (!email) return;
   const itemsHtml = order.items.map(it =>
-    `<li>${esc(it.name)}${it.size && it.size !== 'TU' ? ` — taille ${esc(it.size)}` : ''} × ${it.qty} — ${(it.priceCents * it.qty / 100).toFixed(2)} €</li>`
+    `<li>${esc(it.name)}${it.color ? ` — ${esc(it.color)}` : ''}${it.size && it.size !== 'TU' ? ` — taille ${esc(it.size)}` : ''} × ${it.qty} — ${(it.priceCents * it.qty / 100).toFixed(2)} €</li>`
   ).join('');
   sendEmail({
     to: email,
@@ -1197,10 +1246,11 @@ function mountRoutes() {
     if (!name) throw new HttpError(400, 'Nom requis');
     const reference = clean(req.body.reference, 60);
     const colors = parseColors(req.body.colors);
+    const colorHex = parseColorHex(req.body.colors);
     const priceCents = parsePriceCents(req.body.price);
     const description = cleanText(req.body.description, 3000);
     const category = clean(req.body.category, 60);
-    const sizes = parseSizes(req.body.sizes);
+    const sizes = parseSizes(req.body.sizes, colors);
     const badges = parseBadges(req.body.badges);
     const discountPercent = intInRange(req.body.discountPercent, 0, 90, 0);
     const flashEndsAt = parseFlashEnd(req.body.flashEndsAt);
@@ -1214,6 +1264,7 @@ function mountRoutes() {
         reference, 
         name, 
         colors, 
+        colorHex, 
         description, 
         priceCents, 
         category, 
@@ -1239,11 +1290,16 @@ function mountRoutes() {
     const patch = {};
     if (b.reference !== undefined) patch.reference = clean(b.reference, 60);
     if (b.name !== undefined) { patch.name = clean(b.name, 120); if (!patch.name) throw new HttpError(400, 'Nom requis'); }
-    if (b.colors !== undefined) patch.colors = parseColors(b.colors);
+    if (b.colors !== undefined) { patch.colors = parseColors(b.colors); patch.colorHex = parseColorHex(b.colors); }
     if (b.description !== undefined) patch.description = cleanText(b.description, 3000);
     if (b.price !== undefined) patch.priceCents = parsePriceCents(b.price);
     if (b.category !== undefined) patch.category = clean(b.category, 60);
-    if (b.sizes !== undefined) patch.sizes = parseSizes(b.sizes);
+    if (b.sizes !== undefined) {
+      const palette = b.colors !== undefined
+        ? patch.colors
+        : ((await store.load()).products.find(p => p.id === productId) || {}).colors || [];
+      patch.sizes = parseSizes(b.sizes, palette);
+    }
     if (b.badges !== undefined) patch.badges = parseBadges(b.badges);
     if (b.discountPercent !== undefined) patch.discountPercent = intInRange(b.discountPercent, 0, 90, 0);
     if (b.flashEndsAt !== undefined) patch.flashEndsAt = parseFlashEnd(b.flashEndsAt);
@@ -1274,18 +1330,19 @@ function mountRoutes() {
   app.patch('/api/admin/products/:id/stock', requireStaff, asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
     const updates = req.body && req.body.sizes;
-    if (!Array.isArray(updates) || updates.length === 0 || updates.length > 30) throw new HttpError(400, 'Liste de tailles requise');
+    if (!Array.isArray(updates) || updates.length === 0 || updates.length > 300) throw new HttpError(400, 'Liste de tailles requise');
     const result = await store.withTransaction(async (data) => {
       const product = data.products.find(p => p.id === id);
       if (!product) throw new HttpError(404, 'Produit introuvable');
       const changes = [];
       for (const u of updates) {
         const size = clean(u && u.size, 10);
-        const entry = (product.sizes || []).find(s => s.size === size);
-        if (!entry) throw new HttpError(400, `Taille inconnue : ${size}`);
+        const color = clean(u && u.color, 40).replace(/::/g, ' ').trim();
+        const entry = (product.sizes || []).find(s => s.size === size && (s.color || '') === color);
+        if (!entry) throw new HttpError(400, `Variante inconnue : ${color ? color + ' / ' : ''}${size}`);
         const stock = parseInt(u.stock, 10);
         if (!Number.isInteger(stock) || stock < 0 || stock > 100000) throw new HttpError(400, `Stock invalide pour ${size}`);
-        changes.push({ size, before: entry.stock, after: stock });
+        changes.push({ size, color, before: entry.stock, after: stock });
         entry.stock = stock;
       }
       return { sizes: product.sizes, changes, productId: product.id };
@@ -1360,7 +1417,7 @@ function mountRoutes() {
         o.source === 'test' ? 'Test (sans paiement)' : 'PayPal',
         o.payerName || c.name || '', o.payerEmail || c.email || '',
         [c.address, c.postalCode, c.city].filter(Boolean).join(', '),
-        (o.items || []).map(it => `${it.name}${it.size && it.size !== 'TU' ? ` (${it.size})` : ''} x${it.qty}`).join(' | '),
+        (o.items || []).map(it => `${it.name}${(it.color || (it.size && it.size !== 'TU')) ? ` (${[it.color, it.size && it.size !== 'TU' ? it.size : ''].filter(Boolean).join(' / ')})` : ''} x${it.qty}`).join(' | '),
         ((o.subtotalCents != null ? o.subtotalCents : o.totalCents) / 100).toFixed(2),
         ((o.shippingCents || 0) / 100).toFixed(2), (o.totalCents / 100).toFixed(2)
       ].map(csvCell).join(';'));
