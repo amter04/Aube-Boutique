@@ -11,6 +11,7 @@
     paypalButtonsInstance: null,
     modalProduct: null,
     modalSelectedSize: null,
+    modalSelectedColor: null,
     modalImageIndex: 0,
     customer: null,
     redeemPoints: false,
@@ -93,7 +94,65 @@
   const cartTotalEl = el('#cart-total');
   const toastEl = el('#toast');
 
-  function cartKey(productId, size) { return `${productId}::${size}`; }
+  function cartKey(productId, size, color) { return `${productId}::${size}::${color || ''}`; }
+
+  // ----- Couleurs -----
+  // Teinte des pastilles : celle saisie par la boutique ("Noir=#111111"), sinon on devine d'après le nom.
+  const COLOR_HEX = {
+    noir: '#1b1b1b', blanc: '#ffffff', ecru: '#f1ead9', ivoire: '#f6f0e0', creme: '#f3e9cf', beige: '#d8c3a5', sable: '#d9c29c',
+    camel: '#b98350', marron: '#6d4a32', chocolat: '#4a2f22', taupe: '#8b7b6b', gris: '#9a9a9a', anthracite: '#3b3f44', argent: '#c4c4c4',
+    rouge: '#c0282d', bordeaux: '#6d1a2c', rose: '#e9a3b4', 'rose poudre': '#ecc7cd', fuchsia: '#c2377f', corail: '#ef7a63', orange: '#e8822a',
+    terracotta: '#c0643e', jaune: '#e9c63a', moutarde: '#c9a227', or: '#c9a24b', vert: '#3f8a4e', kaki: '#6b6b3a', sauge: '#9ab08f',
+    olive: '#707a3a', emeraude: '#1f7a5c', menthe: '#a6dcc0', turquoise: '#2bb3b1', bleu: '#2c63b8', marine: '#1b2a49', 'bleu marine': '#1b2a49',
+    ciel: '#8fc1e8', 'bleu ciel': '#8fc1e8', denim: '#4b6a8f', violet: '#6a3f8f', lilas: '#c3a6d8', mauve: '#a98bc4', prune: '#5b2a4e', lavande: '#b9a7d8'
+  };
+  function normColor(n) { return String(n || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(); }
+  function colorHexFor(p, name) {
+    if (p.colorHex && p.colorHex[name]) return p.colorHex[name];
+    const n = normColor(name);
+    if (COLOR_HEX[n]) return COLOR_HEX[n];
+    const hit = Object.keys(COLOR_HEX).sort((a, b) => b.length - a.length).find(k => n.includes(k));
+    return hit ? COLOR_HEX[hit] : '';
+  }
+  function swatchHtml(p, name) {
+    const hex = colorHexFor(p, name);
+    return `<span class="swatch ${hex ? '' : 'swatch-none'}" ${hex ? `style="background:${hex}"` : ''}></span>`;
+  }
+  function hasColors(p) { return !!(p.colors && p.colors.length); }
+  // Lignes de stock d'une couleur (ou, pour les anciens produits sans couleur sur le stock, le stock partagé).
+  function sizesForColor(p, color) {
+    if (!hasColors(p)) return p.sizes || [];
+    const exact = (p.sizes || []).filter(s => (s.color || '') === (color || ''));
+    return exact.length ? exact : (p.sizes || []).filter(s => !s.color);
+  }
+  function colorInStock(p, name) { return sizesForColor(p, name).some(s => s.inStock); }
+  function findVariantClient(p, size, color) {
+    const list = sizesForColor(p, color);
+    return list.find(s => s.size === size) || null;
+  }
+  // Tailles affichées : celles de la couleur choisie ; sans couleur choisie, l'union (dispo si une couleur l'a).
+  function sizeOptions(p) {
+    if (!hasColors(p)) return (p.sizes || []).map(s => ({ size: s.size, inStock: s.inStock, stock: s.stock }));
+    if (state.modalSelectedColor) return sizesForColor(p, state.modalSelectedColor).map(s => ({ size: s.size, inStock: s.inStock, stock: s.stock }));
+    const map = new Map();
+    for (const s of (p.sizes || [])) {
+      const cur = map.get(s.size) || { size: s.size, inStock: false, stock: 0 };
+      cur.inStock = cur.inStock || s.inStock; cur.stock += s.stock;
+      map.set(s.size, cur);
+    }
+    return [...map.values()];
+  }
+  // Retire du panier les lignes devenues invalides (produit coloré sans couleur, couleur supprimée...).
+  function pruneCart() {
+    let changed = false;
+    for (const key of Object.keys(state.cart)) {
+      const [idStr, , color = ''] = key.split('::');
+      const p = state.products.find(x => x.id === parseInt(idStr, 10));
+      if (!p) continue;
+      if (hasColors(p) && (!color || !p.colors.includes(color))) { delete state.cart[key]; changed = true; }
+    }
+    if (changed) { try { localStorage.setItem('aube_cart', JSON.stringify(state.cart)); } catch (e) {} }
+  }
 
   function saveCart() {
     localStorage.setItem('aube_cart', JSON.stringify(state.cart));
@@ -645,6 +704,13 @@
     return `<div class="card-sizes">${p.sizes.map(s => `<span class="sz ${s.inStock ? '' : 'out'}">${s.size}</span>`).join('')}</div>`;
   }
 
+  function cardColorsHtml(p) {
+    if (!hasColors(p)) return '';
+    const shown = p.colors.slice(0, 6).map(c => `<span class="dot ${colorInStock(p, c) ? '' : 'out'}" title="${escapeHtml(c)}">${swatchHtml(p, c)}</span>`).join('');
+    const more = p.colors.length > 6 ? `<span class="dot-more">+${p.colors.length - 6}</span>` : '';
+    return `<div class="card-colors">${shown}${more}</div>`;
+  }
+
   function cardHtml(p) {
     const countdown = p.badges && p.badges.includes('flash') ? flashCountdownText(p.flashEndsAt) : '';
     const images = p.images && p.images.length ? p.images : (p.imageUrl ? [p.imageUrl] : []);
@@ -661,6 +727,7 @@
         ${p.category ? `<div class="card-cat">${escapeHtml(p.category)}</div>` : ''}
         <div class="card-name">${escapeHtml(p.name)}</div>
         ${priceHtml(p)}
+        ${cardColorsHtml(p)}
         ${cardSizesHtml(p)}
         ${p.inStock && p.stock <= LOW_STOCK_THRESHOLD ? `<div class="low-stock">Il reste ${p.stock} exemplaire${p.stock > 1 ? 's' : ''}</div>` : ''}
         ${countdown ? `<div class="flash-countdown">${countdown}</div>` : ''}
@@ -829,7 +896,9 @@
     const p = state.products.find(x => x.id === id);
     if (!p) return;
     state.modalProduct = p;
-    state.modalSelectedSize = (p.sizes && p.sizes.length === 1) ? p.sizes[0].size : null;
+    state.modalSelectedColor = (p.colors && p.colors.length === 1) ? p.colors[0] : null;
+    const opts = sizeOptions(p);
+    state.modalSelectedSize = opts.length === 1 ? opts[0].size : null;
     state.modalImageIndex = 0;
 
     renderModalGallery();
@@ -838,6 +907,7 @@
     el('#modal-price').innerHTML = priceHtml(p);
     el('#modal-desc').textContent = p.description || '';
     updateWishlistHeart();
+    renderColorPicker();
     renderSizePicker();
     updateModalAddButton();
     renderPerks(p);
@@ -992,16 +1062,42 @@
     }
   });
 
+  function renderColorPicker() {
+    const p = state.modalProduct;
+    const container = el('#modal-colors');
+    if (!hasColors(p)) { container.innerHTML = ''; container.style.display = 'none'; return; }
+    container.style.display = 'block';
+    const sel = state.modalSelectedColor;
+    container.innerHTML = `
+      <div class="opt-label">Couleur${sel ? ` : <strong>${escapeHtml(sel)}</strong>` : ''}</div>
+      <div class="color-list">${p.colors.map(c => `
+        <button type="button" class="color-opt ${c === sel ? 'selected' : ''} ${!colorInStock(p, c) ? 'out' : ''}" data-color="${escapeHtml(c)}" title="${escapeHtml(c)}" aria-label="${escapeHtml(c)}">
+          ${swatchHtml(p, c)}<span class="color-name">${escapeHtml(c)}</span>
+        </button>`).join('')}</div>`;
+    container.querySelectorAll('.color-opt').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.modalSelectedColor = btn.dataset.color;
+        // On garde la taille choisie si elle existe dans cette couleur, sinon on la réinitialise.
+        const opts = sizeOptions(p);
+        if (!opts.some(o => o.size === state.modalSelectedSize)) state.modalSelectedSize = opts.length === 1 ? opts[0].size : null;
+        renderColorPicker();
+        renderSizePicker();
+        updateModalAddButton();
+      });
+    });
+  }
+
   function renderSizePicker() {
     const p = state.modalProduct;
     const container = el('#modal-sizes');
-    if (!p.sizes || p.sizes.length === 0) {
+    const options = sizeOptions(p);
+    if (options.length === 0) {
       container.innerHTML = '';
       return;
     }
-    container.innerHTML = p.sizes.map(s => `
+    container.innerHTML = options.map(s => `
       <button type="button" class="size-opt ${s.size === state.modalSelectedSize ? 'selected' : ''} ${!s.inStock ? 'out' : ''}"
-        data-size="${s.size}">${s.size}</button>
+        data-size="${escapeHtml(s.size)}">${escapeHtml(s.size)}</button>
     `).join('');
     container.querySelectorAll('.size-opt').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -1019,7 +1115,10 @@
     const alertBox = el('#modal-alert');
     const alertsOn = !!state.config.stockAlertsEnabled;
     const hasSizes = p.sizes && p.sizes.length > 0;
-    const selected = hasSizes ? p.sizes.find(s => s.size === state.modalSelectedSize) : null;
+    const needColor = hasColors(p);
+    const selected = hasSizes && (!needColor || state.modalSelectedColor)
+      ? (needColor ? findVariantClient(p, state.modalSelectedSize, state.modalSelectedColor) : p.sizes.find(s => s.size === state.modalSelectedSize))
+      : null;
 
     alertBox.style.display = 'none';
     el('#alert-msg').textContent = '';
@@ -1035,6 +1134,11 @@
     if (!p.inStock && !alertsOn) {
       addBtn.disabled = true;
       addBtn.textContent = 'Épuisé';
+      return;
+    }
+    if (needColor && !state.modalSelectedColor) {
+      addBtn.disabled = true;
+      addBtn.textContent = 'Choisir une couleur';
       return;
     }
     if (hasSizes && !selected) {
@@ -1056,12 +1160,12 @@
     }
     if (hasSizes && selected) {
       note.textContent = selected.stock > 0 && selected.stock <= LOW_STOCK_THRESHOLD
-        ? `Il reste ${selected.stock} exemplaire${selected.stock > 1 ? 's' : ''} dans cette taille`
+        ? `Il reste ${selected.stock} exemplaire${selected.stock > 1 ? 's' : ''} dans cette taille${needColor ? ' et cette couleur' : ''}`
         : '';
     }
     addBtn.disabled = false;
     addBtn.textContent = 'Ajouter au panier';
-    addBtn.onclick = () => addToCart(p.id, state.modalSelectedSize || 'TU');
+    addBtn.onclick = () => addToCart(p.id, state.modalSelectedSize || 'TU', 1, needColor ? state.modalSelectedColor : '');
   }
 
   el('#alert-submit').addEventListener('click', async () => {
@@ -1072,7 +1176,7 @@
     try {
       const res = await fetch('/api/stock-alerts', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productId: p.id, size: state.modalSelectedSize, email })
+        body: JSON.stringify({ productId: p.id, size: state.modalSelectedSize, color: state.modalSelectedColor || '', email })
       });
       const data = await res.json().catch(() => ({}));
       msg.textContent = res.ok ? 'C\'est noté, on te prévient dès que c\'est de retour !' : (data.error || 'Inscription impossible pour le moment.');
@@ -1084,8 +1188,8 @@
   el('#modal-close').addEventListener('click', () => closeProductModal());
   modal.addEventListener('click', (e) => { if (e.target === modal) closeProductModal(); });
 
-  function addToCart(productId, size, qty = 1) {
-    const key = cartKey(productId, size);
+  function addToCart(productId, size, qty = 1, color = '') {
+    const key = cartKey(productId, size, color);
     state.cart[key] = (state.cart[key] || 0) + qty;
     state.promo = null;
     saveCart();
@@ -1107,9 +1211,9 @@
   }
 
   function findProductAndSize(key) {
-    const [idStr, size] = key.split('::');
+    const [idStr, size, color = ''] = key.split('::');
     const p = state.products.find(x => x.id === parseInt(idStr, 10));
-    return { product: p, size };
+    return { product: p, size, color };
   }
 
   function unitPrice(p) { return p.discountPercent > 0 ? p.finalPrice : p.price; }
@@ -1206,6 +1310,7 @@
   }
 
   function renderCartDrawer() {
+    pruneCart();
     const entries = Object.entries(state.cart);
     if (entries.length === 0) {
       cartItemsEl.innerHTML = `<div class="empty-state">
@@ -1224,14 +1329,14 @@
     }
 
     cartItemsEl.innerHTML = entries.map(([key, qty]) => {
-      const { product: p, size } = findProductAndSize(key);
+      const { product: p, size, color } = findProductAndSize(key);
       if (!p) return '';
       return `
         <div class="cart-item" data-key="${key}">
           ${p.imageUrl ? `<img src="${p.imageUrl}" alt="${escapeHtml(p.name)}">` : `<div style="width:68px;height:88px;background:var(--paper-raised);"></div>`}
           <div class="cart-item-info">
             <div class="name">${escapeHtml(p.name)}</div>
-            ${size && size !== 'TU' ? `<div class="size-label">Taille ${size}</div>` : ''}
+            ${(color || (size && size !== 'TU')) ? `<div class="size-label">${[color ? escapeHtml(color) : '', size && size !== 'TU' ? `Taille ${escapeHtml(size)}` : ''].filter(Boolean).join(' · ')}</div>` : ''}
             <div class="price">${fmt(unitPrice(p))}</div>
             <div class="qty-row">
               <button class="qty-minus">−</button>
@@ -1391,8 +1496,8 @@
     }
 
     payload.items = Object.keys(state.cart).map(key => {
-      const [idStr, size] = key.split('::');
-      return { productId: parseInt(idStr, 10), size, qty: state.cart[key] };
+      const [idStr, size, color = ''] = key.split('::');
+      return { productId: parseInt(idStr, 10), size, color, qty: state.cart[key] };
     });
 
     const btn = el('#test-checkout-submit');
@@ -1463,8 +1568,8 @@
       },
       createOrder: async () => {
         const items = Object.keys(state.cart).map(key => {
-          const [idStr, size] = key.split('::');
-          return { productId: parseInt(idStr, 10), size, qty: state.cart[key] };
+          const [idStr, size, color = ''] = key.split('::');
+          return { productId: parseInt(idStr, 10), size, color, qty: state.cart[key] };
         });
         const body = { items, acceptTerms: true };
         if (state.promo) body.promoCode = state.promo.code;
@@ -1574,7 +1679,7 @@
 
   setInterval(() => {
     if (el('#trending').style.display !== 'none') renderTrending();
-    if (state.modalProduct && modal.classList.contains('open')) renderSizePicker();
+    if (state.modalProduct && modal.classList.contains('open')) { renderColorPicker(); renderSizePicker(); }
   }, 60000);
 
   (async function init() {
