@@ -31,10 +31,11 @@ module.exports = {
 
     // ----- 2. ROUTE PUBLIQUE : INSCRIPTION À UNE ALERTE -----
     app.post('/api/stock-alerts', alertLimiter, asyncHandler(async (req, res) => {
-      const { productId, size, email: mailInput } = req.body || {};
+      const { productId, size, color, email: mailInput } = req.body || {};
       const id = parseId(productId);
       const mail = validEmail(mailInput);
       const cleanSize = clean(size, 10);
+      const cleanColor = clean(color, 40);
 
       if (!mail) throw new HttpError(400, 'Adresse email invalide.');
       if (!cleanSize) throw new HttpError(400, 'Taille requise.');
@@ -47,12 +48,13 @@ module.exports = {
         const alerts = await getAlerts(dbData);
         if (alerts.length >= MAX_ALERTS) throw new HttpError(503, 'Les alertes sont momentanément indisponibles.');
         // Évite les doublons d'inscription
-        const exists = alerts.some(a => a.productId === id && a.size === cleanSize && a.email === mail);
+        const exists = alerts.some(a => a.productId === id && a.size === cleanSize && (a.color || '') === cleanColor && a.email === mail);
         if (!exists) {
           alerts.push({
             id: ctx.secureToken(16), // sert aussi de jeton de désinscription
             productId: id,
             size: cleanSize,
+            color: cleanColor,
             email: mail,
             createdAt: new Date().toISOString()
           });
@@ -86,14 +88,14 @@ module.exports = {
       // On repère les tailles dont le stock est passé de 0 à au moins 1
       const restockedSizes = changes
         .filter(c => c.before === 0 && c.after > 0)
-        .map(c => c.size);
+        .map(c => `${c.color || ''}::${c.size}`);
 
       if (restockedSizes.length === 0) return;
 
       const toRemoveIds = [];
 
       for (const alert of alerts) {
-        if (alert.productId === productId && restockedSizes.includes(alert.size)) {
+        if (alert.productId === productId && restockedSizes.includes(`${alert.color || ''}::${alert.size}`)) {
           toRemoveIds.push(alert.id);
 
           // Envoi de l'email via Resend
@@ -103,7 +105,7 @@ module.exports = {
             subject: `Aube — Bonne nouvelle ! ${product.name} est de retour`,
             html: `<div style="font-family:sans-serif; color:#201A16; max-width:500px;">
               <h2>De nouveau disponible !</h2>
-              <p>La pièce <strong>${esc(product.name)}</strong> (Taille ${esc(alert.size)}) que vous attendiez est de nouveau en stock.</p>
+              <p>La pièce <strong>${esc(product.name)}</strong> (${alert.color ? esc(alert.color) + ', ' : ''}taille ${esc(alert.size)}) que vous attendiez est de nouveau en stock.</p>
               <p><a href="${esc(productUrl)}" style="display:inline-block; padding:10px 18px; background:#800020; color:#fff; text-decoration:none; border-radius:4px;">Voir la pièce</a></p>
               <p style="font-size:12px; color:#777;">Vous recevez cet email car vous vous êtes inscrite à une alerte sur notre boutique. <a href="${esc(baseUrl() + '/api/stock-alerts/unsubscribe/' + alert.id)}">Me désinscrire</a>.</p>
             </div>`
