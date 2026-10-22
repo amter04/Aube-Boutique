@@ -158,6 +158,7 @@
   }
 
   function sizeLabel(size) { return size && size !== 'TU' ? `Taille ${size}` : 'Taille unique'; }
+  function variantLabel(it) { return `${it.color ? it.color + ' · ' : ''}${sizeLabel(it.size)}`; }
 
   function addressLines(o) {
     const c = o.customer || {};
@@ -295,7 +296,7 @@
           ${img ? `<img src="${esc(img)}" alt="" loading="lazy">` : '<div class="eq-ph"></div>'}
           <div class="eq-item-info">
             <div class="eq-item-name">${esc(it.name)}</div>
-            <div class="eq-item-meta">${esc(sizeLabel(it.size))}</div>
+            <div class="eq-item-meta">${esc(variantLabel(it))}</div>
           </div>
           <div class="eq-qty">× ${it.qty}</div>
         </div>`;
@@ -453,7 +454,7 @@
     const rows = o.items.map(it => `
       <tr>
         <td><span class="chk"></span>${esc(it.name)}</td>
-        <td>${esc(sizeLabel(it.size))}</td>
+        <td>${esc(variantLabel(it))}</td>
         <td class="q">× ${it.qty}</td>
       </tr>`).join('');
 
@@ -499,18 +500,18 @@
     if (!orders.length) return;
     const map = new Map();
     orders.forEach(o => o.items.forEach(it => {
-      const key = `${it.productId}::${it.size}`;
-      if (!map.has(key)) map.set(key, { name: it.name, size: it.size, qty: 0, orders: [] });
+      const key = `${it.productId}::${it.size}::${it.color || ''}`;
+      if (!map.has(key)) map.set(key, { name: it.name, size: it.size, color: it.color || '', qty: 0, orders: [] });
       const entry = map.get(key);
       entry.qty += it.qty;
       if (!entry.orders.includes(o.id)) entry.orders.push(o.id);
     }));
-    const lines = [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'fr') || String(a.size).localeCompare(String(a.size)));
+    const lines = [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'fr') || String(a.color).localeCompare(String(b.color), 'fr') || String(a.size).localeCompare(String(b.size)));
     const totalPieces = lines.reduce((s, l) => s + l.qty, 0);
     const rows = lines.map(l => `
       <tr>
         <td><span class="chk"></span>${esc(l.name)}</td>
-        <td>${esc(sizeLabel(l.size))}</td>
+        <td>${esc(variantLabel(l))}</td>
         <td class="q">× ${l.qty}</td>
         <td class="small">${l.orders.map(id => '#' + id).join(', ')}</td>
       </tr>`).join('');
@@ -535,9 +536,9 @@
   });
 
   // ---------- Stock ----------
-  function editKey(pid, size) { return `${pid}::${size}`; }
+  function editKey(pid, size, color) { return `${pid}::${size}::${color || ''}`; }
   function targetOf(pid, s) {
-    const k = editKey(pid, s.size);
+    const k = editKey(pid, s.size, s.color);
     return state.stockEdits[k] !== undefined ? state.stockEdits[k] : s.stock;
   }
   function productDirty(p) { return (p.sizes || []).some(s => targetOf(p.id, s) !== s.stock); }
@@ -575,12 +576,12 @@
     ].join('');
     const dirty = productDirty(p);
     const sizes = (p.sizes || []).map(s => {
-      const key = editKey(p.id, s.size);
+      const key = editKey(p.id, s.size, s.color);
       const target = targetOf(p.id, s);
       const delta = target - s.stock;
       return `
         <div class="eq-size ${delta !== 0 ? 'changed' : ''}" data-key="${esc(key)}">
-          <span class="eq-size-label">${esc(s.size)}</span>
+          <span class="eq-size-label">${s.color ? esc(s.color) + ' · ' : ''}${esc(s.size)}</span>
           <div class="eq-stepper">
             <button type="button" data-action="minus" data-key="${esc(key)}" aria-label="Retirer 1">−</button>
             <input type="number" min="0" class="eq-stock-input" data-key="${esc(key)}" value="${target}">
@@ -607,12 +608,11 @@
   }
 
   function setTarget(key, value) {
-    const [pidStr, ...rest] = key.split('::');
-    const size = rest.join('::');
+    const [pidStr, size, color = ''] = key.split('::');
     const pid = parseInt(pidStr, 10);
     const p = productById(pid);
     if (!p) return;
-    const s = p.sizes.find(x => x.size === size);
+    const s = p.sizes.find(x => x.size === size && (x.color || '') === color);
     if (!s) return;
     const target = Math.max(0, parseInt(value, 10) || 0);
     if (target === s.stock) delete state.stockEdits[key]; else state.stockEdits[key] = target;
@@ -639,7 +639,7 @@
     const p = productById(pid);
     if (!p) return;
     const changes = p.sizes
-      .map(s => ({ size: s.size, baseline: s.stock, target: targetOf(pid, s) }))
+      .map(s => ({ size: s.size, color: s.color || '', baseline: s.stock, target: targetOf(pid, s) }))
       .filter(c => c.target !== c.baseline);
     if (!changes.length) return;
 
@@ -651,10 +651,10 @@
       if (!fp) { showToast('Cette pièce n\'existe plus.'); return; }
       let moved = false;
       const sizes = changes.map(c => {
-        const fs = fp.sizes.find(x => x.size === c.size);
+        const fs = fp.sizes.find(x => x.size === c.size && (x.color || '') === c.color);
         const freshStock = fs ? fs.stock : c.baseline;
         if (freshStock !== c.baseline) moved = true;
-        return { size: c.size, stock: Math.max(0, freshStock + (c.target - c.baseline)) };
+        return { size: c.size, color: c.color, stock: Math.max(0, freshStock + (c.target - c.baseline)) };
       });
 
       const res = await fetch(`/api/admin/products/${pid}/stock`, {
@@ -666,7 +666,7 @@
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { showToast(data.error || 'Erreur, le stock n\'a pas été modified.'); return; }
 
-      changes.forEach(c => delete state.stockEdits[editKey(pid, c.size)]);
+      changes.forEach(c => delete state.stockEdits[editKey(pid, c.size, c.color)]);
       state.products = await fetchJson('/api/admin/products');
       renderAll();
       showToast(moved ? 'Stock enregistré (des ventes ont eu lieu entre-temps, la différence a été appliquée au stock réel).' : 'Stock enregistré');
