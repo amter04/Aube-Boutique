@@ -463,20 +463,51 @@
   });
 
   // ---------- Sizes ----------
-  function renderSizeGrid(activeSizes = []) {
+  // Couleurs saisies dans le champ texte ("Écru, Noir=#111111") : on ne garde que les noms.
+  function parseColorNames(text) {
+    const seen = new Set();
+    const out = [];
+    String(text || '').split(',').forEach(tok => {
+      const name = tok.split('=')[0].replace(/::/g, ' ').trim().slice(0, 40);
+      if (name && !seen.has(name.toLowerCase())) { seen.add(name.toLowerCase()); out.push(name); }
+    });
+    return out.slice(0, 12);
+  }
+  function colorsToText(p) {
+    const names = Array.isArray(p.colors) ? p.colors : [];
+    const hex = p.colorHex || {};
+    return names.map(n => hex[n] ? `${n}=${hex[n]}` : n).join(', ');
+  }
+
+  // Une grille de tailles par couleur (ou une seule grille si le produit n'a pas de couleur).
+  function renderSizeGrid(activeSizes = [], colors = parseColorNames(el('#p-colors').value)) {
     const container = el('#size-grid');
-    container.innerHTML = STANDARD_SIZES.map(size => {
-      const existing = activeSizes.find(s => s.size === size);
-      return `
-        <div class="size-row ${existing ? 'active' : ''}" data-size="${size}">
+    const groups = colors.length ? colors : [''];
+    const lookup = (group, size) => {
+      const exact = activeSizes.find(s => s.size === size && (s.color || '') === group);
+      if (exact) return exact;
+      if (activeSizes.some(s => (s.color || '') === group)) return null; // couleur déjà réglée : taille non cochée
+      const legacy = group ? activeSizes.find(s => s.size === size && !s.color) : null; // ancien stock partagé
+      if (legacy) return legacy;
+      const other = activeSizes.find(s => s.size === size); // nouvelle couleur : on reprend les tailles déjà choisies
+      return other ? { size, stock: group ? 1 : other.stock } : null;
+    };
+    container.innerHTML = groups.map(group => `
+      <div class="size-group" data-color="${esc(group)}">
+        ${group ? `<div class="size-group-title">Couleur : <strong>${esc(group)}</strong></div>` : ''}
+        <div class="size-group-rows">${STANDARD_SIZES.map(size => {
+          const existing = lookup(group, size);
+          return `
+        <div class="size-row ${existing ? 'active' : ''}" data-size="${size}" data-color="${esc(group)}">
           <label>
             <input type="checkbox" class="size-check" ${existing ? 'checked' : ''}>
             ${size}
           </label>
           <input type="number" class="size-stock" min="0" value="${existing ? existing.stock : 1}">
-        </div>
-      `;
-    }).join('');
+        </div>`;
+        }).join('')}</div>
+      </div>
+    `).join('');
     container.querySelectorAll('.size-row').forEach(row => {
       row.querySelector('.size-check').addEventListener('change', (e) => {
         row.classList.toggle('active', e.target.checked);
@@ -489,11 +520,18 @@
     el('#size-grid').querySelectorAll('.size-row').forEach(row => {
       if (row.querySelector('.size-check').checked) {
         const stock = Math.max(0, parseInt(row.querySelector('.size-stock').value, 10) || 0);
-        sizes.push({ size: row.dataset.size, stock });
+        sizes.push({ size: row.dataset.size, color: row.dataset.color || '', stock });
       }
     });
     return sizes;
   }
+
+  // Quand on change la liste des couleurs, la grille de stock suit (en gardant ce qui est déjà saisi).
+  let colorsTimer = null;
+  el('#p-colors').addEventListener('input', () => {
+    clearTimeout(colorsTimer);
+    colorsTimer = setTimeout(() => renderSizeGrid(collectSizes(), parseColorNames(el('#p-colors').value)), 350);
+  });
 
   // ---------- Photos ----------
   function renderPhotoGrid() {
@@ -621,12 +659,12 @@
     el('#product-id').value = id;
     el('#p-ref').value = p.reference || '';
     el('#p-name').value = p.name;
-    el('#p-colors').value = Array.isArray(p.colors) ? p.colors.join(', ') : (p.colors || '');
+    el('#p-colors').value = colorsToText(p);
     el('#p-desc').value = p.description || '';
     el('#p-price').value = p.price;
     refreshCategoryOptions(p.category || '');
 
-    renderSizeGrid(p.sizes || []);
+    renderSizeGrid(p.sizes || [], parseColorNames(el('#p-colors').value));
 
     existingImages = [...(p.images || [])];
     newFiles = [];
@@ -757,7 +795,7 @@
         </div>
         <div style="color:#77706A;">${esc(o.payerName || 'Client')} ${o.payerEmail ? `· ${esc(o.payerEmail)}` : ''}</div>
         ${address ? `<div style="color:#918A80; font-size:13px;">${esc(address)}</div>` : ''}
-        <div style="color:#918A80; font-size:13px;">${new Date(o.createdAt).toLocaleString('fr-FR')} · ${o.items.map(i => `${esc(i.name)}${i.size && i.size !== 'TU' ? ` (${esc(i.size)})` : ''} ×${i.qty}`).join(', ')}</div>
+        <div style="color:#918A80; font-size:13px;">${new Date(o.createdAt).toLocaleString('fr-FR')} · ${o.items.map(i => `${esc(i.name)}${(i.color || (i.size && i.size !== 'TU')) ? ` (${esc([i.color, i.size && i.size !== 'TU' ? i.size : ''].filter(Boolean).join(' / '))})` : ''} ×${i.qty}`).join(', ')}</div>
         <div style="color:#918A80; font-size:12.5px; margin-top:4px;">Sous-total ${fmt(o.subtotal)} + livraison ${fmt(o.shipping)}${o.discount > 0 ? ` − ${fmt(o.discount)}` : ''}</div>
         ${(o.pointsEarned > 0 || o.pointsRedeemed > 0) ? `<div style="color:var(--wine); font-size:12.5px; margin-top:2px;">${o.pointsEarned > 0 ? `+${o.pointsEarned} points gagnés` : ''}${o.pointsEarned > 0 && o.pointsRedeemed > 0 ? ' · ' : ''}${o.pointsRedeemed > 0 ? `${o.pointsRedeemed} points utilisés` : ''}</div>` : ''}
       </div>
