@@ -40,7 +40,7 @@
         <h3 style="font-size:16px; margin-bottom:10px;">Articles</h3>
         ${o.items.map(it => `
           <div class="item-line">
-            <span>${esc(it.name)}${it.size && it.size !== 'TU' ? ` — taille ${esc(it.size)}` : ''} × ${it.qty}</span>
+            <span>${esc(it.name)}${it.color ? ` — ${esc(it.color)}` : ''}${it.size && it.size !== 'TU' ? ` — taille ${esc(it.size)}` : ''} × ${it.qty}</span>
             <span>${fmt(it.priceCents * it.qty / 100)}</span>
           </div>
         `).join('')}
