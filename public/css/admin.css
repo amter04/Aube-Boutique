@@ -402,3 +402,8 @@ body.admin .admin-header { background: #fff; border-bottom: 0; }
 .status-pill.created { background: #EEF1E8; color: var(--soft); border-color: transparent; }
 .badge-tag.promo { background: #F6E3D3; color: #9A4A22; }
 
+
+/* Stock par couleur */
+.size-group { flex: 1 1 100%; margin-top: 6px; }
+.size-group-title { font-size: 13px; margin: 8px 0 2px; color: #4a433c; }
+.size-group-rows { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
