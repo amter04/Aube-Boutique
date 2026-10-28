@@ -41,7 +41,7 @@ module.exports = {
       if (!cleanSize) throw new HttpError(400, 'Taille requise.');
 
       const data = await store.load();
-      const product = data.products.find(p => p.id === id && p.isActive);
+      const product = data.products.find(p => p.id === id && ctx.catalogue.isLive(p));
       if (!product) throw new HttpError(404, 'Produit introuvable.');
 
       await store.withTransaction(async (dbData) => {
