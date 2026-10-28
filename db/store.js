@@ -246,6 +246,6 @@ function normalizeEmail(email) {
 
 module.exports = {
   load, save, withTransaction, USE_POSTGRES,
-  totalStock, effectivePriceCents, isPromoActive, STANDARD_SIZES, slugify, randomToken,
+  totalStock, effectivePriceCents, isPromoActive, STANDARD_SIZES, PRODUCT_STATUSES,slugify, randomToken,
   hashPassword, verifyPassword, normalizeEmail
 };
