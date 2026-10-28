@@ -12,6 +12,9 @@ const multer = require('multer');
 const store = require('./db/store');
 const storage = require('./db/storage');
 const { supabase, authClient } = require('./db/supabase');
+const auditLog = require('./db/audit');
+const auditText = require('./lib/audit-text');
+const tz = require('./lib/tz');
 
 let pool = null;
 try { pool = require('./db/pool').pool || null; } catch (e) { pool = null; }
@@ -26,6 +29,11 @@ const PORT = process.env.PORT || 3000;
 const CURRENCY = process.env.CURRENCY || 'EUR';
 const ALLOWED_BADGES = ['promo', 'flash', 'tendance'];
 const MAX_IMAGES_PER_PRODUCT = 6;
+const PRODUCT_STATUSES = store.PRODUCT_STATUSES; // online | hidden | draft | archived
+const LOW_STOCK_THRESHOLD = 3; // « stock faible » : une variante à 3 pièces ou moins
+// Droits des employés (le patron a tout). Par défaut : préparer les commandes et gérer le stock.
+const STAFF_PERMISSIONS = ['orders', 'stock', 'catalogue', 'customers', 'refunds', 'dashboard'];
+const DEFAULT_EMPLOYEE_PERMISSIONS = ['orders', 'stock'];
 const MAX_CART_LINES = 30;
 const MAX_QTY_PER_LINE = 20;
 const STAFF_SESSION_MS = 8 * 60 * 60 * 1000;          // patron / employé : 8 h
@@ -134,8 +142,19 @@ function parseColorHex(raw) {
   return map;
 }
 
+// Trace une action : dans les logs (Render) ET dans le journal consultable de l'admin (db/audit.js).
+// Ne bloque jamais l'action en cas d'erreur.
 function audit(event, req, extra) {
   console.log(JSON.stringify({ t: new Date().toISOString(), event, ip: req && req.ip, ...(extra || {}) }));
+  try {
+    const staff = req && req.staff;
+    const details = { ...(extra || {}) };
+    details.text = auditText.describe(event, details);
+    Promise.resolve(auditLog.append({
+      actor: staff ? staff.name : (extra && extra.by) || '', role: staff ? staff.role : '',
+      event, ip: req && req.ip, details
+    })).catch(() => {});
+  } catch (e) { /* le journal est facultatif */ }
 }
 
 // ----- Limiteurs -----
@@ -322,21 +341,30 @@ async function employeeStatus(id) {
   if (hit && hit.until > Date.now()) return hit;
   const data = await store.load();
   const emp = (data.employees || []).find(e => e.id === id);
-  const rec = { ok: !!emp && emp.active !== false, name: emp ? emp.name : '', until: Date.now() + STAFF_CHECK_TTL_MS };
+  const rec = { ok: !!emp && emp.active !== false, name: emp ? emp.name : '', permissions: emp ? employeePermissions(emp) : [], until: Date.now() + STAFF_CHECK_TTL_MS };
   staffCache.set(id, rec);
   return rec;
 }
 const invalidateStaff = (id) => staffCache.delete(id);
+
+function employeePermissions(e) {
+  if (Array.isArray(e.permissions)) return e.permissions.filter(p => STAFF_PERMISSIONS.includes(p));
+  return DEFAULT_EMPLOYEE_PERMISSIONS.slice(); // comptes créés avant la gestion des droits
+}
+function parsePermissions(raw) {
+  const list = Array.isArray(raw) ? raw : [];
+  return [...new Set(list.map(String).filter(p => STAFF_PERMISSIONS.includes(p)))];
+}
 
 function staffSessionFresh(s) { return s && s.roleSince && (Date.now() - s.roleSince) < STAFF_SESSION_MS; }
 
 async function resolveStaff(req) {
   const s = req.session;
   if (!s || !s.role || !staffSessionFresh(s)) return null;
-  if (s.role === 'admin') return { role: 'admin', name: 'Patron' };
+  if (s.role === 'admin') return { role: 'admin', name: 'Patron', permissions: STAFF_PERMISSIONS.slice() };
   if (s.role === 'employee') {
     const st = await employeeStatus(s.employeeId);
-    if (st.ok) return { role: 'employee', name: st.name, id: s.employeeId };
+    if (st.ok) return { role: 'employee', name: st.name, id: s.employeeId, permissions: st.permissions };
   }
   return null;
 }
@@ -347,6 +375,18 @@ const requireStaff = asyncHandler(async (req, res, next) => {
   req.staff = who;
   next();
 });
+// Autorise le patron, ou un employé qui possède AU MOINS UN des droits demandés.
+function requirePerm(...needed) {
+  return asyncHandler(async (req, res, next) => {
+    const who = await resolveStaff(req);
+    if (!who) throw new HttpError(401, 'Non autorise');
+    if (who.role !== 'admin' && !needed.some(p => who.permissions.includes(p))) {
+      throw new HttpError(403, 'Tu n\'as pas le droit d\'effectuer cette action.');
+    }
+    req.staff = who;
+    next();
+  });
+}
 const requireAdmin = asyncHandler(async (req, res, next) => {
   const who = await resolveStaff(req);
   if (!who || who.role !== 'admin') throw new HttpError(401, 'Non autorise');
@@ -500,11 +540,101 @@ function toPublicProduct(p) {
   };
 }
 
-function toAdminProduct(p) {
+// ----- Statut d'une fiche : online | hidden | draft | archived (+ date de mise en ligne programmée) -----
+// Les anciennes fiches n'ont que `isActive` : elles sont lues comme « online » / « hidden ».
+function productStatus(p) {
+  return PRODUCT_STATUSES.includes(p.status) ? p.status : (p.isActive ? 'online' : 'hidden');
+}
+// Visible sur la boutique : en ligne ET date de mise en ligne atteinte.
+function isLive(p) {
+  if (productStatus(p) !== 'online') return false;
+  if (p.publishAt && new Date(p.publishAt).getTime() > Date.now()) return false;
+  return true;
+}
+function setProductStatus(p, status) {
+  p.status = status;
+  p.isActive = status === 'online';
+  if (status !== 'online') p.publishAt = null; // une date programmée n'a de sens que pour une fiche « en ligne »
+}
+function parseStatus(v) {
+  const s = String(v || '');
+  if (!PRODUCT_STATUSES.includes(s)) throw new HttpError(400, 'Statut invalide');
+  return s;
+}
+// "2026-11-02T09:00" (formulaire) ou "02/11/2026 09:00" (CSV), lus à l'heure de la boutique. Vide → null.
+function parsePublishAt(v) {
+  if (v === undefined || v === null || String(v).trim() === '') return null;
+  const d = tz.parseLocalDate(v);
+  if (!d) throw new HttpError(400, 'Date de mise en ligne invalide');
+  return d.toISOString();
+}
+
+// Référence : « ref 01 », « REF-01 » et « REF01 » sont considérées identiques (casse, espaces, tirets, accents ignorés).
+const normRef = (r) => String(r == null ? '' : r).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+function assertRefFree(data, reference, exceptId) {
+  const key = normRef(reference);
+  if (!key) return; // une fiche sans référence reste autorisée
+  const clash = data.products.find(p => p.id !== exceptId && normRef(p.reference) === key);
+  if (clash) throw new HttpError(409, `La référence « ${reference} » est déjà utilisée par « ${clash.name} » (fiche n°${clash.id}).`);
+}
+function uniqueRefCopy(data, reference) {
+  const base = String(reference || '').trim();
+  if (!base) return '';
+  let candidate = `${base}-copie`;
+  for (let n = 2; data.products.some(p => normRef(p.reference) === normRef(candidate)); n++) candidate = `${base}-copie-${n}`;
+  return candidate.slice(0, 60);
+}
+
+// Pièces vendues par fiche (commandes payées) — sert au tri « meilleures ventes ».
+function unitsSoldMap(data) {
+  const map = new Map();
+  for (const o of data.orders || []) {
+    if (o.status !== 'paid') continue;
+    for (const it of o.items || []) map.set(it.productId, (map.get(it.productId) || 0) + (it.qty || 0));
+  }
+  return map;
+}
+
+// { champ: { from, to } } pour les champs qui ont changé.
+function diffFields(before, after, keys) {
+  const out = {};
+  for (const k of keys) {
+    const a = before[k] == null ? null : before[k];
+    const b = after[k] == null ? null : after[k];
+    if (JSON.stringify(a) !== JSON.stringify(b)) out[k] = { from: a, to: b };
+  }
+  return out;
+}
+
+// Variantes (couleur + taille) dont le stock a changé entre deux listes.
+function stockChanges(before, after) {
+  const prev = new Map((before || []).map(s => [`${s.color || ''}::${s.size}`, s.stock || 0]));
+  const out = [];
+  for (const s of after || []) {
+    const was = prev.has(`${s.color || ''}::${s.size}`) ? prev.get(`${s.color || ''}::${s.size}`) : 0;
+    if (was !== (s.stock || 0)) out.push({ size: s.size, color: s.color || '', before: was, after: s.stock || 0 });
+  }
+  return out;
+}
+
+function toAdminProduct(p, opts = {}) {
+  const stock = computeStock(p);
+  const images = productImages(p);
+  const sizes = p.sizes || [];
+  const status = productStatus(p);
+  const live = isLive(p);
   return {
     id: p.id, reference: p.reference || '', name: p.name, colors: p.colors || [], colorHex: p.colorHex || {}, description: p.description, price: p.priceCents / 100, category: p.category,
-    images: productImages(p), sizes: p.sizes || [], stock: computeStock(p), badges: p.badges || [],
-    discountPercent: p.discountPercent || 0, flashEndsAt: p.flashEndsAt || null, isActive: !!p.isActive
+    images, sizes, stock, badges: p.badges || [],
+    discountPercent: p.discountPercent || 0, flashEndsAt: p.flashEndsAt || null,
+    status, publishAt: p.publishAt || null, scheduled: status === 'online' && !live,
+    isActive: live, // visible sur la boutique en ce moment
+    createdAt: p.createdAt, sold: opts.sold || 0,
+    // Repères pour les filtres de la liste
+    soldOut: stock === 0,
+    lowStock: stock > 0 && sizes.some(s => (s.stock || 0) > 0 && (s.stock || 0) <= LOW_STOCK_THRESHOLD),
+    onPromo: (p.discountPercent || 0) > 0,
+    noPhoto: images.length === 0
   };
 }
 
@@ -628,7 +758,7 @@ function buildOrderFromCart(data, cart) {
   let subtotalCents = 0;
   const orderItems = [];
   for (const item of cart) {
-    const product = data.products.find(p => p.id === item.productId && p.isActive);
+    const product = data.products.find(p => p.id === item.productId && isLive(p));
     if (!product) throw new HttpError(400, 'Un produit de ton panier n\'est plus disponible.');
     const hasColors = (product.colors || []).length > 0;
     let color = '';
@@ -724,7 +854,7 @@ async function priceOrder(data, { cart, account, redeemPoints, body }) {
 
 // ----- Clientes / employés -----
 function toPublicCustomer(c) { return c ? { id: c.id, name: c.name, email: c.email, points: c.points || 0, createdAt: c.createdAt } : null; }
-function toPublicEmployee(e) { return { id: e.id, name: e.name, email: e.email, active: e.active !== false, createdAt: e.createdAt }; }
+function toPublicEmployee(e) { return { id: e.id, name: e.name, email: e.email, active: e.active !== false, permissions: employeePermissions(e), createdAt: e.createdAt }; }
 function findCustomerByEmail(data, email) {
   const norm = store.normalizeEmail(email);
   return data.customers.find(c => store.normalizeEmail(c.email) === norm);
@@ -819,6 +949,12 @@ const ctx = {
   publicConfig: { add: (fn) => publicConfigExtras.push(fn) },
   frontend: { addScript: (p) => { if (/^\/js\/features\/[a-z0-9_-]+\.js$/i.test(p)) frontendScripts.push(p); else console.warn('Script boutique refusé :', p); } },
   email: { send: sendEmail },
+  requirePerm, permissions: STAFF_PERMISSIONS,
+  catalogue: {
+    isLive, productStatus, setProductStatus, normRef, parsePriceCents, parseColors, parseColorHex,
+    toAdminProduct, unitsSoldMap, diffFields, stockChanges
+  },
+  LOW_STOCK_THRESHOLD, supaAdmin, auditLog, csvCell,
   broadcast: broadcastUpdate,
   secureToken, storage,
   helpers: { toAdminOrder, toPublicOrder, toPublicProduct, finalPriceCents, computeStock, audit, saveProcessedImage }
@@ -848,14 +984,14 @@ function mountRoutes() {
 
   app.get('/api/products', asyncHandler(async (req, res) => {
     const data = await store.load();
-    const rows = data.products.filter(p => p.isActive).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const rows = data.products.filter(isLive).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     res.json(rows.map(toPublicProduct));
   }));
 
   app.get('/api/products/:id', asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
     const data = await store.load();
-    const row = data.products.find(p => p.id === id && p.isActive);
+    const row = data.products.find(p => p.id === id && isLive(p));
     if (!row) throw new HttpError(404, 'Produit introuvable');
     res.json(toPublicProduct(row));
   }));
@@ -947,8 +1083,8 @@ function mountRoutes() {
 
   app.get('/api/admin/check', asyncHandler(async (req, res) => {
     const who = await resolveStaff(req);
-    if (!who) return res.json({ isAdmin: false, role: null });
-    res.json({ isAdmin: who.role === 'admin', role: who.role, name: who.name });
+    if (!who) return res.json({ isAdmin: false, role: null, permissions: [] });
+    res.json({ isAdmin: who.role === 'admin', role: who.role, name: who.name, permissions: who.permissions });
   }));
 
   // ----- Comptes employés (créés par le patron via Supabase Admin) -----
@@ -962,6 +1098,7 @@ function mountRoutes() {
     const email = validEmail(req.body && req.body.email);
     if (!name || !email) throw new HttpError(400, 'Nom et email valides requis');
     const password = checkPassword(req.body.password);
+    const permissions = Array.isArray(req.body.permissions) ? parsePermissions(req.body.permissions) : DEFAULT_EMPLOYEE_PERMISSIONS.slice();
 
     const { data: authData, error: authError } = await supaAdmin().auth.admin.createUser({
       email,
@@ -988,13 +1125,14 @@ function mountRoutes() {
         name,
         email: store.normalizeEmail(email),
         active: true,
+        permissions,
         createdAt: new Date().toISOString()
       };
       data.employees.push(e);
       return e;
     });
 
-    audit('employee.created', req, { employeeId: employee.id });
+    audit('employee.created', req, { employeeId: employee.id, name: employee.name, permissions: employee.permissions });
     res.status(201).json(toPublicEmployee(employee));
   }));
 
@@ -1002,10 +1140,12 @@ function mountRoutes() {
     const id = parseId(req.params.id);
     const { active, password } = req.body || {};
     const newPassword = password ? checkPassword(password) : null;
+    const newPermissions = req.body && Array.isArray(req.body.permissions) ? parsePermissions(req.body.permissions) : null;
     const employee = await store.withTransaction(async (data) => {
       const e = data.employees.find(x => x.id === id);
       if (!e) throw new HttpError(404, 'Employe introuvable');
       if (active !== undefined) e.active = !!active;
+      if (newPermissions) e.permissions = newPermissions;
       return e;
     });
 
@@ -1014,7 +1154,7 @@ function mountRoutes() {
     }
 
     invalidateStaff(id);
-    audit('employee.updated', req, { employeeId: id });
+    audit('employee.updated', req, { employeeId: id, name: employee.name, ...(newPermissions ? { permissions: newPermissions } : {}), ...(active !== undefined ? { active: !!active } : {}) });
     res.json(toPublicEmployee(employee));
   }));
 
@@ -1188,9 +1328,9 @@ function mountRoutes() {
       ordersToday: data.orders.filter(o => !['created', 'expired'].includes(o.status) && new Date(o.createdAt).toDateString() === today).length,
       paidOrdersCount: paid.length,
       productsCount: data.products.length,
-      activeProductsCount: data.products.filter(p => p.isActive).length,
-      outOfStock: data.products.filter(p => p.isActive && computeStock(p) === 0).length,
-      lowStock: data.products.filter(p => p.isActive && computeStock(p) > 0 && computeStock(p) <= 3).length
+      activeProductsCount: data.products.filter(isLive).length,
+      outOfStock: data.products.filter(p => isLive(p) && computeStock(p) === 0).length,
+      lowStock: data.products.filter(p => isLive(p) && computeStock(p) > 0 && computeStock(p) <= LOW_STOCK_THRESHOLD).length
     });
   }));
 
@@ -1238,10 +1378,11 @@ function mountRoutes() {
   // ----- Produits -----
   app.get('/api/admin/products', requireStaff, asyncHandler(async (req, res) => {
     const data = await store.load();
-    res.json([...data.products].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(toAdminProduct));
+    const sold = unitsSoldMap(data);
+    res.json([...data.products].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(p => toAdminProduct(p, { sold: sold.get(p.id) })));
   }));
 
-  app.post('/api/admin/products', requireAdmin, uploadImages, asyncHandler(async (req, res) => {
+  app.post('/api/admin/products', requirePerm('catalogue'), uploadImages, asyncHandler(async (req, res) => {
     const name = clean(req.body.name, 120);
     if (!name) throw new HttpError(400, 'Nom requis');
     const reference = clean(req.body.reference, 60);
@@ -1254,11 +1395,19 @@ function mountRoutes() {
     const badges = parseBadges(req.body.badges);
     const discountPercent = intInRange(req.body.discountPercent, 0, 90, 0);
     const flashEndsAt = parseFlashEnd(req.body.flashEndsAt);
+    // Statut : « status » si fourni, sinon la case « Visible » de l'ancien formulaire, sinon en ligne.
+    const status = req.body.status !== undefined ? parseStatus(req.body.status)
+      : (req.body.isActive !== undefined ? ((req.body.isActive === 'true' || req.body.isActive === true) ? 'online' : 'hidden') : 'online');
+    const publishAt = status === 'online' ? parsePublishAt(req.body.publishAt) : null;
+
+    // Vérification rapide AVANT d'envoyer les photos (la vérification définitive est dans la transaction).
+    assertRefFree(await store.load(), reference, null);
 
     const images = [];
     for (const file of (req.files || [])) images.push(await saveProcessedImage(file.buffer));
 
     const product = await store.withTransaction(async (data) => {
+      assertRefFree(data, reference, null);
       const p = { 
         id: data.nextProductId++, 
         reference, 
@@ -1273,18 +1422,20 @@ function mountRoutes() {
         badges, 
         discountPercent, 
         flashEndsAt, 
-        isActive: true, 
         createdAt: new Date().toISOString() 
       };
+      setProductStatus(p, status);
+      p.publishAt = publishAt;
       data.products.push(p);
       return p;
     });
     broadcastUpdate();
+    audit('product.created', req, { productId: product.id, name: product.name, reference: product.reference, price: product.priceCents / 100, status });
     hooks.emit('product.saved', { product, created: true });
     res.status(201).json({ id: product.id });
   }));
 
-  app.put('/api/admin/products/:id', requireAdmin, uploadImages, asyncHandler(async (req, res) => {
+  app.put('/api/admin/products/:id', requirePerm('catalogue'), uploadImages, asyncHandler(async (req, res) => {
     const productId = parseId(req.params.id);
     const b = req.body || {};
     const patch = {};
@@ -1303,7 +1454,10 @@ function mountRoutes() {
     if (b.badges !== undefined) patch.badges = parseBadges(b.badges);
     if (b.discountPercent !== undefined) patch.discountPercent = intInRange(b.discountPercent, 0, 90, 0);
     if (b.flashEndsAt !== undefined) patch.flashEndsAt = parseFlashEnd(b.flashEndsAt);
-    if (b.isActive !== undefined) patch.isActive = (b.isActive === 'true' || b.isActive === true);
+    const statusIn = b.status !== undefined ? parseStatus(b.status) : null;
+    const isActiveIn = b.isActive !== undefined ? (b.isActive === 'true' || b.isActive === true) : null; // ancien formulaire
+    const publishIn = b.publishAt !== undefined ? parsePublishAt(b.publishAt) : undefined;
+    if (patch.reference) assertRefFree(await store.load(), patch.reference, productId); // avant l'envoi des photos
     let keep = null;
     if (b.keepImages !== undefined) {
       try { const parsed = JSON.parse(b.keepImages); if (Array.isArray(parsed)) keep = parsed.filter(u => typeof u === 'string'); } catch (e) { keep = null; }
@@ -1312,17 +1466,29 @@ function mountRoutes() {
     const newImages = [];
     for (const file of (req.files || [])) newImages.push(await saveProcessedImage(file.buffer));
 
-    const product = await store.withTransaction(async (data) => {
+    const { product, auditInfo } = await store.withTransaction(async (data) => {
       const existing = data.products.find(p => p.id === productId);
       if (!existing) throw new HttpError(404, 'Produit introuvable');
+      if (patch.reference !== undefined) assertRefFree(data, patch.reference, productId);
+      const watched = (x) => ({ reference: x.reference || '', name: x.name, category: x.category || '', price: x.priceCents / 100, discountPercent: x.discountPercent || 0, status: productStatus(x), publishAt: x.publishAt || null });
+      const before = watched(existing);
+      const sizesBefore = JSON.parse(JSON.stringify(existing.sizes || []));
       Object.assign(existing, patch);
+      if (statusIn) setProductStatus(existing, statusIn);
+      else if (isActiveIn !== null) {
+        if (isActiveIn) { if (productStatus(existing) !== 'online') setProductStatus(existing, 'online'); }
+        else if (productStatus(existing) === 'online') setProductStatus(existing, 'hidden');
+      }
+      if (publishIn !== undefined && productStatus(existing) === 'online') existing.publishAt = publishIn;
       const current = productImages(existing);
       const kept = keep === null ? current : keep.filter(u => current.includes(u));
       existing.images = [...kept, ...newImages].slice(0, MAX_IMAGES_PER_PRODUCT);
       delete existing.imageUrl;
-      return existing;
+      return { product: existing, auditInfo: { changes: diffFields(before, watched(existing), Object.keys(before)), stock: stockChanges(sizesBefore, existing.sizes) } };
     });
     broadcastUpdate();
+    if (Object.keys(auditInfo.changes).length) audit('product.updated', req, { productId, name: product.name, changes: auditInfo.changes, via: 'fiche' });
+    if (auditInfo.stock.length) audit('stock.changed', req, { productId, name: product.name, changes: auditInfo.stock, via: 'fiche' });
     hooks.emit('product.saved', { product, created: false });
     res.json({ ok: true });
   }));
@@ -1353,25 +1519,46 @@ function mountRoutes() {
     res.json({ ok: true, sizes: result.sizes });
   }));
 
-  app.post('/api/admin/products/:id/duplicate', requireAdmin, asyncHandler(async (req, res) => {
+  app.post('/api/admin/products/:id/duplicate', requirePerm('catalogue'), asyncHandler(async (req, res) => {
     const productId = parseId(req.params.id);
     const copy = await store.withTransaction(async (data) => {
       const existing = data.products.find(p => p.id === productId);
       if (!existing) throw new HttpError(404, 'Produit introuvable');
-      const c = { ...JSON.parse(JSON.stringify(existing)), id: data.nextProductId++, name: `${existing.name} (copie)`.slice(0, 120), isActive: false, createdAt: new Date().toISOString() };
+      const c = { ...JSON.parse(JSON.stringify(existing)), id: data.nextProductId++, name: `${existing.name} (copie)`.slice(0, 120), createdAt: new Date().toISOString() };
+      c.reference = uniqueRefCopy(data, existing.reference); // la référence doit rester unique
+      setProductStatus(c, 'draft'); // la copie n'apparaît jamais en ligne par surprise
       data.products.push(c);
       return c;
     });
     broadcastUpdate();
+    audit('product.duplicated', req, { productId: copy.id, name: copy.name, from: productId });
     res.status(201).json({ id: copy.id });
   }));
 
-  app.delete('/api/admin/products/:id', requireAdmin, asyncHandler(async (req, res) => {
+  // « Supprimer » ARCHIVE la fiche : les anciennes commandes gardent leur lien avec elle.
+  // La suppression définitive (?permanent=1) n'est possible que pour une fiche déjà archivée et jamais commandée.
+  app.delete('/api/admin/products/:id', requirePerm('catalogue'), asyncHandler(async (req, res) => {
     const productId = parseId(req.params.id);
-    await store.withTransaction(async (data) => { data.products = data.products.filter(p => p.id !== productId); });
+    const permanent = req.query.permanent === '1';
+    const out = await store.withTransaction(async (data) => {
+      const p = data.products.find(x => x.id === productId);
+      if (!p) throw new HttpError(404, 'Produit introuvable');
+      if (permanent) {
+        if (productStatus(p) !== 'archived') throw new HttpError(400, 'Archive d\'abord la fiche avant de la supprimer définitivement.');
+        if ((data.orders || []).some(o => (o.items || []).some(i => i.productId === productId))) {
+          throw new HttpError(409, 'Cette pièce figure dans des commandes : elle reste archivée pour garder leur historique.');
+        }
+        data.products = data.products.filter(x => x.id !== productId);
+        return { name: p.name, permanent: true };
+      }
+      const was = productStatus(p);
+      setProductStatus(p, 'archived');
+      return { name: p.name, permanent: false, was };
+    });
     broadcastUpdate();
-    audit('product.deleted', req, { productId });
-    res.json({ ok: true });
+    if (out.permanent) audit('product.deleted', req, { productId, name: out.name });
+    else audit('product.updated', req, { productId, name: out.name, changes: { status: { from: out.was, to: 'archived' } }, via: 'archivage' });
+    res.json({ ok: true, archived: !out.permanent });
   }));
 
   // ----- Commandes (équipe) -----
@@ -1673,7 +1860,7 @@ function mountRoutes() {
   app.get('/sitemap.xml', asyncHandler(async (req, res) => {
     const data = await store.load();
     const base = baseUrl(req);
-    const urls = ['/', ...data.products.filter(p => p.isActive).map(p => `/produit/${productSlug(p)}`)];
+    const urls = ['/', ...data.products.filter(isLive).map(p => `/produit/${productSlug(p)}`)];
     res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map(u => `  <url><loc>${esc(base + u)}</loc></url>`).join('\n')}\n</urlset>\n`);
   }));
   app.get('/favicon.ico', (req, res) => res.redirect(301, '/favicon.svg'));
