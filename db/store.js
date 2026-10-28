@@ -30,7 +30,7 @@ if (USE_POSTGRES) {
 
 // Catalogue de tailles utilise par la boutique (admin + site)
 const STANDARD_SIZES = ['S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'S/M', 'M/L', 'L/XL', 'TU'];
-
+const PRODUCT_STATUSES = ['online', 'hidden', 'draft', 'archived'];
 function defaultData() {
   return {
     products: [],
