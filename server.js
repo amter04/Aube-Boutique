@@ -12,7 +12,8 @@ const multer = require('multer');
 const store = require('./db/store');
 const storage = require('./db/storage');
 const { supabase, authClient } = require('./db/supabase');
-
+const auditLog = require('./db/audit');
+const auditText = require('./lib/audit-text');
 const tz = require('./lib/tz');
 
 let pool = null;
