@@ -42,7 +42,7 @@
 <main class="wrap" id="admin-main" style="display:none; padding-top:32px; padding-bottom:80px;">
   <div class="admin-tabs">
     <button class="admin-tab active" data-tab="dashboard" data-role="admin">Tableau de bord</button>
-    <button class="admin-tab" data-tab="products" data-role="admin">Produits</button>
+    <button class="admin-tab" data-tab="products" data-perm="catalogue">Produits</button>
     <button class="admin-tab" data-tab="orders">Commandes</button>
     <button class="admin-tab" data-tab="customers" data-role="admin">Clientes</button>
     <button class="admin-tab" data-tab="promos" data-role="admin">Codes promo</button>
@@ -55,118 +55,59 @@
     <div class="stats-grid" id="stats-grid"></div>
   </section>
 
-<section id="tab-products" style="display:none;">
-    <div class="admin-layout">
-      <div class="panel">
-        <h3 id="form-title">Ajouter une pièce</h3>
-        <form id="product-form">
-          <input type="hidden" id="product-id">
-
-          <div class="field">
-            <label>Photos (jusqu'à 6 — dos, détail tissu, porté...)</label>
-            <div class="photo-grid" id="photo-grid"></div>
-            <input type="file" id="p-images" accept="image/*" multiple>
-            <p class="hint">La première photo est celle affichée dans le catalogue. Elles sont redimensionnées et compressées automatiquement.</p>
-          </div>
-
-          <div class="field-row">
-            <div class="field">
-              <label for="p-ref">Référence / SKU</label>
-              <input type="text" id="p-ref" placeholder="Ex. ROB-LIN-001">
-            </div>
-            <div class="field">
-              <label for="p-name">Nom</label>
-              <input type="text" id="p-name" required placeholder="Ex. Robe Lin Écru">
-            </div>
-          </div>
-
-          <div class="field">
-            <label for="p-colors">Couleurs disponibles</label>
-            <input type="text" id="p-colors" placeholder="Ex. Écru, Noir, Bordeaux (séparées par des virgules)">
-            <p class="hint">Le stock se règle ensuite pour chaque couleur et chaque taille, juste en dessous. Pour choisir la teinte de la pastille (facultatif), ajoute son code : <em>Bordeaux=#800020</em>.</p>
-          </div>
-
-          <div class="field">
-            <label for="p-desc">Description</label>
-            <textarea id="p-desc" placeholder="Matière, coupe, entretien..."></textarea>
-          </div>
-
-          <div class="field">
-            <label for="p-price">Prix (€)</label>
-            <input type="number" id="p-price" step="0.01" min="0" required>
-          </div>
-
-          <div class="field">
-            <label for="p-category">Catégorie</label>
-            <div style="display:flex; gap:8px;">
-              <select id="p-category" style="flex:1;"></select>
-              <button type="button" class="btn secondary" id="new-cat-btn" style="padding:8px 14px; font-size:13px; white-space:nowrap;">+ Nouvelle</button>
-            </div>
-          </div>
-
-          <div class="field">
-            <label>Tailles &amp; stock</label>
-            <div id="size-grid" class="size-grid"></div>
-          </div>
-
-          <!-- Section Cross-Selling ("Complétez le look") -->
-          <div class="field" id="cross-selling-box" style="display:none; margin-top:16px; padding:12px; background:var(--paper-raised, #f7f5f0); border-radius:6px;">
-            <label style="font-weight:bold; margin-bottom:6px; display:block;">Complétez le look (pièces assorties)</label>
-            <p class="hint" style="margin-bottom:8px;">Sélectionnez les pièces suggérées sur la fiche produit :</p>
-            <div id="cross-selling-options" style="max-height:160px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
-          </div>
-
-          <div class="field promo-box" style="margin-top:16px;">
-            <label class="check-line">
-              <input type="checkbox" id="p-trending"> Mettre en avant dans « Tendances »
-            </label>
-            <label class="check-line">
-              <input type="checkbox" id="p-promo-active"> Activer une promotion
-            </label>
-            <div id="promo-fields" style="display:none;">
-              <div class="field-row">
-                <div class="field">
-                  <label for="p-discount">Réduction (%)</label>
-                  <input type="number" id="p-discount" min="1" max="90" value="10">
-                </div>
-                <div class="field">
-                  <label for="p-promo-end">Fin de la vente flash (optionnel)</label>
-                  <input type="datetime-local" id="p-promo-end">
-                </div>
-              </div>
-              <p class="hint">Sans date de fin : badge « Promo » permanent. Avec une date : compte à rebours affiché comme vente flash.</p>
-            </div>
-          </div>
-
-          <div class="field" id="active-field" style="display:none;">
-            <label class="check-line"><input type="checkbox" id="p-active"> Visible sur la boutique</label>
-          </div>
-          <div style="display:flex; gap:10px; margin-top:16px;">
-            <button type="submit" class="btn wine" id="submit-btn">Ajouter</button>
-            <button type="button" class="btn secondary" id="cancel-edit" style="display:none;">Annuler</button>
-          </div>
-          <p class="error-text" id="form-error"></p>
-        </form>
-      </div>
-
-      <div class="panel">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <h3 style="margin:0;">Catalogue</h3>
-          <!-- Tri / Filtre par catégorie -->
-          <div style="display:flex; align-items:center; gap:8px;">
-            <label for="filter-category" style="font-size:13px; font-weight:bold;">Filtrer :</label>
-            <select id="filter-category" style="padding:4px 8px; font-size:13px;">
-              <option value="ALL">Toutes les catégories</option>
-            </select>
-          </div>
+  <section id="tab-products" style="display:none;">
+    <div class="panel cat-panel">
+      <div class="cat-head">
+        <h3>Catalogue <span class="cat-count" id="cat-count"></span></h3>
+        <div class="cat-actions">
+          <button type="button" class="btn wine sm" id="new-product-btn">+ Nouvelle pièce</button>
+          <button type="button" class="btn secondary sm" id="import-btn">Importer (CSV)</button>
+          <a class="btn secondary sm" id="export-btn" href="/api/admin/products/export.csv" download>Exporter (CSV)</a>
+          <button type="button" class="btn secondary sm" id="cats-btn">Catégories</button>
         </div>
-        <table class="product-table">
-          <thead>
-            <tr><th></th><th>Réf. / Nom</th><th>Couleurs</th><th>Prix</th><th>Stock total</th><th>Statut</th><th></th></tr>
-          </thead>
-          <tbody id="product-rows"></tbody>
-        </table>
       </div>
+
+      <div class="cat-tools">
+        <div class="cat-search-box">
+          <input type="search" id="cat-search" placeholder="Rechercher : référence, nom, catégorie, couleur…" autocomplete="off" aria-label="Rechercher dans le catalogue">
+        </div>
+        <select id="cat-sort" aria-label="Trier">
+          <option value="recent">Plus récentes</option>
+          <option value="best">Meilleures ventes</option>
+          <option value="priceAsc">Prix croissant</option>
+          <option value="priceDesc">Prix décroissant</option>
+          <option value="stockAsc">Stock : le plus bas</option>
+          <option value="stockDesc">Stock : le plus haut</option>
+          <option value="name">Nom A → Z</option>
+        </select>
+        <select id="filter-category" aria-label="Filtrer par catégorie">
+          <option value="ALL">Toutes les catégories</option>
+        </select>
+      </div>
+
+      <div class="cchips" id="status-chips" role="group" aria-label="Statut"></div>
+      <div class="cchips" id="flag-chips" role="group" aria-label="Filtres combinables"></div>
+
+      <div class="bulk-bar" id="bulk-bar" style="display:none;">
+        <strong id="bulk-count"></strong>
+        <button type="button" data-bulk="online">Mettre en ligne</button>
+        <button type="button" data-bulk="hidden">Masquer</button>
+        <button type="button" data-bulk="discount">Promo…</button>
+        <button type="button" data-bulk="category">Catégorie…</button>
+        <button type="button" data-bulk="archive">Archiver</button>
+        <button type="button" data-bulk="unarchive">Sortir des archives</button>
+        <button type="button" class="link" id="bulk-clear">Tout désélectionner</button>
+      </div>
+
+      <table class="product-table cat-table">
+        <thead>
+          <tr>
+            <th class="col-check"><input type="checkbox" id="check-all" aria-label="Tout sélectionner"></th>
+            <th></th><th>Réf. / Nom</th><th>Couleurs</th><th>Prix / promo</th><th>Stock</th><th>Vendues</th><th>Statut</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="product-rows"></tbody>
+      </table>
     </div>
   </section>
 
@@ -348,6 +289,130 @@
     </div>
   </section>
 </main>
+
+<!-- Panneau latéral : fiche produit -->
+<div class="pd-overlay" id="drawer-overlay" style="display:none;"></div>
+<aside class="pd" id="drawer" aria-hidden="true" role="dialog" aria-labelledby="form-title">
+  <div class="pd-head">
+    <h3 id="form-title">Ajouter une pièce</h3>
+    <button type="button" class="pd-close" id="drawer-close" aria-label="Fermer">&times;</button>
+  </div>
+  <div class="pd-body">
+    <form id="product-form">
+      <input type="hidden" id="product-id">
+
+      <div class="field">
+        <label>Photos (jusqu'à 6 — dos, détail tissu, porté...)</label>
+        <div class="photo-grid" id="photo-grid"></div>
+        <input type="file" id="p-images" accept="image/*" multiple>
+        <p class="hint">La première photo est celle affichée dans le catalogue. Glisse-les pour changer l'ordre (ou utilise les flèches ‹ ›). Elles sont redimensionnées et compressées automatiquement.</p>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="p-ref">Référence / SKU</label>
+          <input type="text" id="p-ref" placeholder="Ex. ROB-LIN-001" autocomplete="off">
+          <p class="ref-warn" id="ref-warn" style="display:none;"></p>
+        </div>
+        <div class="field">
+          <label for="p-name">Nom</label>
+          <input type="text" id="p-name" required placeholder="Ex. Robe Lin Écru">
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="p-status">Statut</label>
+          <select id="p-status">
+            <option value="online">En ligne</option>
+            <option value="hidden">Masquée</option>
+            <option value="draft">Brouillon</option>
+            <option value="archived">Archivée</option>
+          </select>
+        </div>
+        <div class="field" id="publish-field">
+          <label for="p-publish-at">Mise en ligne programmée</label>
+          <input type="datetime-local" id="p-publish-at">
+        </div>
+      </div>
+      <p class="hint" id="publish-hint" style="margin-top:-6px; margin-bottom:14px;">Date vide : visible tout de suite. Sinon la pièce reste cachée jusqu'à la date choisie (heure de Paris).</p>
+
+      <div class="field">
+        <label for="p-colors">Couleurs disponibles</label>
+        <input type="text" id="p-colors" placeholder="Ex. Écru, Noir, Bordeaux (séparées par des virgules)">
+        <p class="hint">Le stock se règle ensuite pour chaque couleur et chaque taille, juste en dessous. Pour choisir la teinte de la pastille (facultatif), ajoute son code : <em>Bordeaux=#800020</em>.</p>
+      </div>
+
+      <div class="field">
+        <label for="p-desc">Description</label>
+        <textarea id="p-desc" placeholder="Matière, coupe, entretien..."></textarea>
+      </div>
+
+      <div class="field">
+        <label for="p-price">Prix (€)</label>
+        <input type="number" id="p-price" step="0.01" min="0" required>
+      </div>
+
+      <div class="field">
+        <label for="p-category">Catégorie</label>
+        <div style="display:flex; gap:8px;">
+          <select id="p-category" style="flex:1;"></select>
+          <button type="button" class="btn secondary" id="new-cat-btn" style="padding:8px 14px; font-size:13px; white-space:nowrap;">+ Nouvelle</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Tailles &amp; stock</label>
+        <div id="size-grid" class="size-grid"></div>
+      </div>
+
+      <!-- Section Cross-Selling ("Complétez le look") -->
+      <div class="field" id="cross-selling-box" style="display:none; margin-top:16px; padding:12px; background:var(--paper-raised, #f7f5f0); border-radius:6px;">
+        <label style="font-weight:bold; margin-bottom:6px; display:block;">Complétez le look (pièces assorties)</label>
+        <p class="hint" style="margin-bottom:8px;">Sélectionnez les pièces suggérées sur la fiche produit :</p>
+        <div id="cross-selling-options" style="max-height:160px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
+      </div>
+
+      <div class="field promo-box" style="margin-top:16px;">
+        <label class="check-line">
+          <input type="checkbox" id="p-trending"> Mettre en avant dans « Tendances »
+        </label>
+        <label class="check-line">
+          <input type="checkbox" id="p-promo-active"> Activer une promotion
+        </label>
+        <div id="promo-fields" style="display:none;">
+          <div class="field-row">
+            <div class="field">
+              <label for="p-discount">Réduction (%)</label>
+              <input type="number" id="p-discount" min="1" max="90" value="10">
+            </div>
+            <div class="field">
+              <label for="p-promo-end">Fin de la vente flash (optionnel)</label>
+              <input type="datetime-local" id="p-promo-end">
+            </div>
+          </div>
+          <p class="hint">Sans date de fin : badge « Promo » permanent. Avec une date : compte à rebours affiché comme vente flash.</p>
+        </div>
+      </div>
+
+      <p class="error-text" id="form-error"></p>
+      <div class="pd-foot" style="display:flex; gap:10px; margin-top:16px;">
+        <button type="submit" class="btn wine" id="submit-btn">Ajouter</button>
+        <button type="button" class="btn secondary" id="cancel-edit">Annuler</button>
+      </div>
+    </form>
+  </div>
+</aside>
+
+<!-- Fenêtre modale (import CSV, catégories, actions groupées) -->
+<div class="dlg-overlay" id="modal-overlay" style="display:none;">
+  <div class="dlg" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="dlg-head"><h3 id="modal-title"></h3><button type="button" class="pd-close" id="modal-close" aria-label="Fermer">&times;</button></div>
+    <div class="dlg-body" id="modal-body"></div>
+    <div class="dlg-foot" id="modal-foot"></div>
+  </div>
+</div>
+<datalist id="cat-datalist"></datalist>
 
 <div class="toast" id="toast"></div>
 
