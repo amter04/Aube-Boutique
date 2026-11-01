@@ -699,6 +699,26 @@ function shippingForSubtotal(settings, subtotalCents) {
   return settings.shippingFlatCents || 0;
 }
 
+// ----- Transporteurs (suivi de colis) -----
+const CARRIERS = {
+  colissimo:    { label: 'Colissimo',     url: (n) => `https://www.laposte.fr/outils/suivre-vos-envois?code=${n}` },
+  mondial_relay:{ label: 'Mondial Relay', url: (n) => `https://www.mondialrelay.fr/suivi-de-colis/?numeroExpedition=${n}` },
+  chronopost:   { label: 'Chronopost',    url: (n) => `https://www.chronopost.fr/tracking-no-cms/suivi-page?listeNumerosLT=${n}` },
+  dhl:          { label: 'DHL',           url: (n) => `https://www.dhl.com/fr-fr/home/tracking.html?tracking-id=${n}` },
+  ups:          { label: 'UPS',           url: (n) => `https://www.ups.com/track?loc=fr_FR&tracknum=${n}` },
+  dpd:          { label: 'DPD',           url: (n) => `https://www.dpd.com/fr/fr/recevoir-un-colis/suivi-de-colis/?parcelNumber=${n}` },
+  gls:          { label: 'GLS',           url: (n) => `https://gls-group.com/FR/fr/suivi-colis?match=${n}` },
+  autre:        { label: 'Autre',         url: null }
+};
+function trackingUrlFor(carrier, number) {
+  const c = CARRIERS[carrier];
+  const n = String(number || '').trim();
+  if (!c || !c.url || !n) return null;
+  return c.url(encodeURIComponent(n));
+}
+const publicSiteUrl = () => (process.env.PUBLIC_URL && /^https?:\/\//.test(process.env.PUBLIC_URL))
+  ? process.env.PUBLIC_URL.replace(/\/+$/, '') : '';
+
 function toAdminOrder(o) {
   return {
     id: o.id, source: o.source || 'paypal', paypalOrderId: o.paypalOrderId || null, status: o.status,
@@ -712,6 +732,12 @@ function toAdminOrder(o) {
     customer: o.customer || null,
     fulfillmentStatus: o.fulfillmentStatus || 'to_prepare',
     trackingNumber: o.trackingNumber || '',
+    carrier: o.carrier || '',
+    trackingUrl: trackingUrlFor(o.carrier, o.trackingNumber),
+    shippedEmailAt: o.shippedEmailAt || null,
+    internalNotes: o.internalNotes || [],
+    cancellation: o.cancellation || null,
+    hasCapture: !!o.paypalCaptureId,
     fulfillmentHistory: o.fulfillmentHistory || [],
     customerId: o.customerId || null,
     pointsEarned: o.pointsEarned || 0, pointsRedeemed: o.pointsRedeemed || 0,
@@ -732,6 +758,9 @@ function toPublicOrder(o) {
     customer: o.customer || null,
     fulfillmentStatus: o.fulfillmentStatus || 'to_prepare',
     trackingNumber: o.trackingNumber || '',
+    carrier: o.carrier || '',
+    carrierLabel: (CARRIERS[o.carrier] || {}).label || '',
+    trackingUrl: trackingUrlFor(o.carrier, o.trackingNumber),
     pointsEarned: o.pointsEarned || 0, pointsRedeemed: o.pointsRedeemed || 0,
     createdAt: o.createdAt
   };
@@ -957,7 +986,9 @@ const ctx = {
   LOW_STOCK_THRESHOLD, supaAdmin, auditLog, csvCell,
   broadcast: broadcastUpdate,
   secureToken, storage,
-  helpers: { toAdminOrder, toPublicOrder, toPublicProduct, finalPriceCents, computeStock, audit, saveProcessedImage }
+  orders: { CARRIERS, trackingUrlFor, releaseStock },
+  paypal: {}, // .refund est ajouté dans mountRoutes()
+  helpers: { toAdminOrder, toPublicOrder, toPublicProduct, finalPriceCents, computeStock, audit, saveProcessedImage, siteUrl: publicSiteUrl }
 };
 
 function mountRoutes() {
@@ -1562,22 +1593,24 @@ function mountRoutes() {
   }));
 
   // ----- Commandes (équipe) -----
-  app.get('/api/admin/orders', requireStaff, asyncHandler(async (req, res) => {
+  app.get('/api/admin/orders', requirePerm('orders'), asyncHandler(async (req, res) => {
     const data = await store.load();
     res.json([...data.orders].filter(o => !['created', 'expired'].includes(o.status)).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(toAdminOrder));
   }));
 
   const FULFILLMENT_STATUSES = ['to_prepare', 'prepared', 'shipped'];
-  app.patch('/api/admin/orders/:id/fulfillment', requireStaff, asyncHandler(async (req, res) => {
+  app.patch('/api/admin/orders/:id/fulfillment', requirePerm('orders'), asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
-    const { status, trackingNumber } = req.body || {};
+    const { status, trackingNumber, carrier } = req.body || {};
     if (status !== undefined && !FULFILLMENT_STATUSES.includes(status)) throw new HttpError(400, 'Statut invalide');
+    if (carrier !== undefined && carrier !== '' && !CARRIERS[carrier]) throw new HttpError(400, 'Transporteur inconnu');
     const result = await store.withTransaction(async (data) => {
       const order = data.orders.find(o => o.id === id);
       if (!order) throw new HttpError(404, 'Commande introuvable');
       if (order.status !== 'paid') throw new HttpError(400, 'Seules les commandes payees peuvent etre preparees');
       const previous = order.fulfillmentStatus || 'to_prepare';
       if (trackingNumber !== undefined) order.trackingNumber = clean(trackingNumber, 60);
+      if (carrier !== undefined) order.carrier = carrier;
       if (status !== undefined && status !== previous) {
         order.fulfillmentStatus = status;
         order.fulfillmentHistory = order.fulfillmentHistory || [];
@@ -1707,6 +1740,26 @@ function mountRoutes() {
     if (!resp.ok) throw new Error('Impossible d\'obtenir un token PayPal');
     return (await resp.json()).access_token;
   }
+
+  // Remboursement (utilisé par features/admin-commandes.js) : renvoie l'identifiant du remboursement PayPal
+  ctx.paypal.refund = async (captureId, refundCents, note, requestId) => {
+    if (!process.env.PAYPAL_CLIENT_ID || !process.env.PAYPAL_CLIENT_SECRET) throw new HttpError(503, 'PayPal n\'est pas configuré : impossible de rembourser depuis l\'admin.');
+    const accessToken = await getPaypalAccessToken();
+    const resp = await fetch(`${PAYPAL_BASE}/v2/payments/captures/${encodeURIComponent(captureId)}/refund`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json', 'PayPal-Request-Id': String(requestId || '').slice(0, 100) },
+      body: JSON.stringify({
+        amount: { value: (refundCents / 100).toFixed(2), currency_code: CURRENCY },
+        note_to_payer: String(note || '').slice(0, 255)
+      })
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok || !body.id) {
+      console.error('Remboursement PayPal refusé :', resp.status, JSON.stringify(body).slice(0, 500));
+      throw new HttpError(502, 'PayPal a refusé le remboursement' + (body.message ? ` (${body.message})` : '') + '.');
+    }
+    return body.id;
+  };
 
   app.post('/api/paypal/create-order', paypalLimiter, asyncHandler(async (req, res) => {
     const body = req.body || {};
