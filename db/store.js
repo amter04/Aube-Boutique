@@ -30,7 +30,10 @@ if (USE_POSTGRES) {
 
 // Catalogue de tailles utilise par la boutique (admin + site)
 const STANDARD_SIZES = ['S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'S/M', 'M/L', 'L/XL', 'TU'];
+
+// Statut d'une fiche produit : en ligne, masquée, brouillon ou archivée
 const PRODUCT_STATUSES = ['online', 'hidden', 'draft', 'archived'];
+
 function defaultData() {
   return {
     products: [],
@@ -246,6 +249,6 @@ function normalizeEmail(email) {
 
 module.exports = {
   load, save, withTransaction, USE_POSTGRES,
-  totalStock, effectivePriceCents, isPromoActive, STANDARD_SIZES, PRODUCT_STATUSES,slugify, randomToken,
+  totalStock, effectivePriceCents, isPromoActive, STANDARD_SIZES, PRODUCT_STATUSES, slugify, randomToken,
   hashPassword, verifyPassword, normalizeEmail
 };
