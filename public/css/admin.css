@@ -567,3 +567,63 @@ body.pd-open { overflow: hidden; }
 /* Cases à cocher : le texte reste à côté de la case (".field label" les passait en bloc) */
 .field label.check-line { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--ink); }
 .field label.check-line input { flex: 0 0 auto; }
+
+
+/* ======================================================================
+   COMMANDES : recherche, filtres, fiche dépliable, notes, annulation
+   ====================================================================== */
+.ord-tools { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 10px; margin-bottom: 12px; align-items: center; }
+.ord-dates { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ord-dates select, .ord-dates input[type="date"], .ord-sel {
+  padding: 10px 14px; font-size: 14px; font-family: inherit; border: 2px solid var(--tint);
+  border-radius: 999px; background: #fff; color: var(--ink);
+}
+.ord-range { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+.ord { border: 1px solid var(--line); border-radius: 14px; margin-bottom: 10px; background: #fff; overflow: hidden; }
+.ord.is-cancelled .ord-head { opacity: .65; }
+.ord-head { display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; flex-wrap: wrap; }
+.ord-head:hover { background: #F7F9F3; }
+.ord-head input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--ink); flex: none; }
+.ord-num { font-weight: 700; min-width: 64px; }
+.ord-who { flex: 1 1 160px; min-width: 0; }
+.ord-who small { display: block; color: var(--soft); font-size: 12.5px; }
+.ord-total { font-weight: 700; white-space: nowrap; }
+.ord-state { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: #EEF1E8; color: var(--soft); white-space: nowrap; }
+.ord-state.to_prepare { background: #F1E4CE; color: #7A5A1E; }
+.ord-state.prepared { background: #E8DCE0; color: var(--wine); }
+.ord-state.shipped { background: #DCE8D2; color: var(--ok); }
+.ord-state.review { background: #FBEBC8; color: #7A5A1E; }
+.ord-state.cancelled { background: #F3DDDD; color: #8B2A2A; }
+.ord-state.test { background: #E4E2DC; color: #4a433c; }
+.ord-note-dot { font-size: 12px; }
+.ord-body { display: none; padding: 4px 16px 16px; border-top: 1px solid var(--line); font-size: 14px; }
+.ord.open .ord-body { display: block; }
+.ord-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 12px; }
+.ord-body h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--soft); font-family: 'Figtree', sans-serif; }
+.ord-items { margin: 0; padding: 0; list-style: none; }
+.ord-items li { padding: 3px 0; }
+.ord-sub { color: var(--soft); font-size: 12.5px; margin-top: 6px; }
+.ord-track { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.ord-track input { flex: 1 1 160px; padding: 9px 14px; border: 2px solid var(--tint); border-radius: 999px; font: inherit; font-size: 14px; }
+.ord-track .ord-sel { padding: 8px 12px; }
+.ord-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.btn.danger-o { background: #fff; color: #8B2A2A; border: 2px solid #E9C6C6; }
+.btn.danger-o:hover { background: #F3DDDD; }
+.ord-notes { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.ord-note { background: #FFF8E6; border-left: 3px solid #E0B84F; padding: 8px 12px; border-radius: 6px; margin-bottom: 6px; font-size: 13.5px; }
+.ord-note small { display: block; color: var(--soft); font-size: 11.5px; margin-top: 2px; }
+.ord-note button { float: right; background: none; border: 0; color: #8B2A2A; font-size: 12px; text-decoration: underline; }
+.ord-note-form { display: flex; gap: 8px; margin-top: 6px; }
+.ord-note-form input { flex: 1; padding: 9px 14px; border: 2px solid var(--tint); border-radius: 999px; font: inherit; font-size: 14px; }
+.ord-warn { background: #F3DDDD; color: #6d2020; padding: 8px 12px; border-radius: 8px; margin-top: 10px; font-size: 13.5px; }
+.ord-history { color: var(--soft); font-size: 12px; margin-top: 10px; }
+.ord-cancel-form label.check-line { margin: 8px 0; }
+.ord-cancel-form textarea, .ord-cancel-form input[type="text"], .ord-cancel-form input[type="number"] {
+  width: 100%; padding: 10px 14px; border: 2px solid var(--tint); border-radius: 12px; font: inherit; font-size: 14px;
+}
+@media (max-width: 720px) {
+  .ord-tools { grid-template-columns: 1fr; }
+  .ord-cols { grid-template-columns: 1fr; gap: 12px; }
+  .ord-head { gap: 8px; }
+}
