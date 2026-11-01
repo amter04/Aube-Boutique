@@ -31,7 +31,7 @@
       <div class="confirm-card">
         <div class="confirm-row"><span>Numéro de commande</span><strong>#${o.id}</strong></div>
         <div class="confirm-row"><span>Date</span><span>${new Date(o.createdAt).toLocaleString('fr-FR')}</span></div>
-        <div class="confirm-row"><span>Statut</span><span>${o.status === 'paid' ? 'Confirmée' : o.status}</span></div>
+        <div class="confirm-row"><span>Statut</span><span>${o.status === 'paid' ? 'Confirmée' : o.status === 'cancelled' ? 'Annulée' : o.status === 'refunded' ? 'Annulée et remboursée' : o.status}</span></div>
         ${o.payerEmail ? `<div class="confirm-row"><span>Email</span><span>${esc(o.payerEmail)}</span></div>` : ''}
         ${o.customer && o.customer.address ? `<div class="confirm-row"><span>Adresse de livraison</span><span>${esc(o.customer.address)}, ${esc(o.customer.postalCode || '')} ${esc(o.customer.city || '')}</span></div>` : ''}
       </div>
@@ -78,4 +78,3 @@
     }
   })();
 })();
-
