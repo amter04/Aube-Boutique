@@ -177,3 +177,8 @@ button.eq-stat:hover { border-color: var(--ink); }
 .eq-size { background: #F7F9F3; border-radius: 14px; border-color: var(--line); }
 .eq-stepper button { border-radius: 50%; }
 .eq-stock-input, .eq-tracking, .eq-search { border-radius: 12px; }
+
+.eq-status.cancelled { background: #F3DDDD; color: #8B2A2A; }
+.eq-status.review { background: #FBEBC8; color: #7A5A1E; }
+.eq-carrier { padding: 8px; border: 1px solid var(--line, #d9d2c8); border-radius: 8px; background: #fff; font: inherit; max-width: 150px; }
+.eq-tracking-row { flex-wrap: wrap; }
