@@ -13,7 +13,11 @@
   // Les noms et adresses viennent des clientes : on les "échappe" toujours avant de les afficher
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  const STATUS_LABEL = { to_prepare: 'À préparer', prepared: 'Préparée', shipped: 'Expédiée', unpaid: 'En attente de paiement' };
+  const STATUS_LABEL = { to_prepare: 'À préparer', prepared: 'Préparée', shipped: 'Expédiée', unpaid: 'En attente de paiement', review: 'À vérifier', cancelled: 'Annulée' };
+  const CARRIERS = [['', 'Transporteur…'], ['colissimo', 'Colissimo'], ['mondial_relay', 'Mondial Relay'], ['chronopost', 'Chronopost'], ['dhl', 'DHL'], ['ups', 'UPS'], ['dpd', 'DPD'], ['gls', 'GLS'], ['autre', 'Autre']];
+  const NOT_SHIPPABLE = ['unpaid', 'review', 'cancelled'];
+  // Expéditrice des étiquettes : coordonnées légales saisies dans l'admin
+  if (window.AubeLabels) AubeLabels.loadSender().then(s => { if (s.name) SHOP.name = s.name; if (s.address) SHOP.address = s.address; });
 
   const state = {
     role: null,
@@ -124,7 +128,10 @@
 
   // ---------- Helpers ----------
   function fulfillmentOf(o) {
-    return o.status === 'paid' ? (o.fulfillmentStatus || 'to_prepare') : 'unpaid';
+    if (o.status === 'paid') return o.fulfillmentStatus || 'to_prepare';
+    if (o.status === 'cancelled' || o.status === 'refunded') return 'cancelled';
+    if (o.status === 'review') return 'review';
+    return 'unpaid';
   }
 
   function productById(id) { return state.products.find(p => p.id === id); }
@@ -275,6 +282,7 @@
 
     el('#print-picklist').disabled = counts.to_prepare === 0;
     el('#print-all-slips').disabled = counts.to_prepare === 0;
+    el('#print-labels').disabled = counts.to_prepare === 0;
 
     let list = state.orders.filter(o => state.orderFilter === 'all' || fulfillmentOf(o) === state.orderFilter);
     list = list.filter(o => matchesOrderSearch(o, state.orderSearch));
@@ -325,11 +333,19 @@
     } else if (f === 'shipped') {
       buttons = `<button type="button" class="btn secondary" data-action="status" data-status="prepared" data-id="${o.id}">↩ Remettre en « préparée »</button>`;
     }
-    buttons += `<button type="button" class="btn secondary" data-action="print" data-id="${o.id}">🖨 Bordereau</button>`;
+    if (!NOT_SHIPPABLE.includes(f)) {
+      buttons += `<button type="button" class="btn secondary" data-action="print" data-id="${o.id}">🖨 Bordereau</button>`;
+      buttons += `<button type="button" class="btn secondary" data-action="label" data-id="${o.id}">🏷 Étiquette</button>`;
+    }
 
-    const tracking = f === 'unpaid' ? '' : `
+    const cancelNote = f === 'cancelled'
+      ? `<div class="eq-address eq-warn"><strong>${o.status === 'refunded' ? 'Annulée et remboursée' : 'Annulée'}</strong>${o.cancellation && o.cancellation.reason ? `<br>${esc(o.cancellation.reason)}` : ''}<br>Ne pas préparer.</div>`
+      : f === 'review' ? `<div class="eq-address eq-warn"><strong>Paiement à vérifier</strong><br>Ne pas expédier avant accord de la patronne.</div>` : '';
+
+    const tracking = NOT_SHIPPABLE.includes(f) ? '' : `
       <p class="eq-label">Numéro de suivi</p>
       <div class="eq-tracking-row">
+        <select class="eq-carrier" data-id="${o.id}" aria-label="Transporteur">${CARRIERS.map(([k, l]) => `<option value="${k}" ${o.carrier === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
         <input type="text" class="eq-tracking" data-id="${o.id}" value="${esc(o.trackingNumber)}" placeholder="Coller le n° de suivi du colis" maxlength="60">
         <button type="button" class="btn secondary eq-sm" data-action="save-tracking" data-id="${o.id}">Enregistrer</button>
       </div>`;
@@ -354,6 +370,7 @@
             ${address}
             ${giftHtml}
             <div class="eq-total">Montant de la commande : ${fmt(o.total)}</div>
+            ${cancelNote}
             ${tracking}
           </div>
         </div>
@@ -385,13 +402,16 @@
     const action = btn.dataset.action;
 
     if (action === 'print') { printSlips([order]); return; }
+    if (action === 'label') { printLabels([order]); return; }
 
     const input = el(`#orders-list .eq-tracking[data-id="${id}"]`);
     const tracking = input ? input.value.trim() : undefined;
+    const carrierSel = el(`#orders-list .eq-carrier[data-id="${id}"]`);
+    const carrier = carrierSel ? carrierSel.value : undefined;
     btn.disabled = true;
     try {
       if (action === 'save-tracking') {
-        const r = await patchFulfillment(id, { trackingNumber: tracking });
+        const r = await patchFulfillment(id, carrier !== undefined ? { trackingNumber: tracking, carrier } : { trackingNumber: tracking });
         if (r) { showToast('Numéro de suivi enregistré'); renderAll(); }
       } else if (action === 'status') {
         const status = btn.dataset.status;
@@ -400,9 +420,10 @@
         }
         const body = { status };
         if (tracking !== undefined) body.trackingNumber = tracking;
+        if (carrier !== undefined) body.carrier = carrier;
         const r = await patchFulfillment(id, body);
         if (r) {
-          showToast(status === 'shipped' ? `Commande #${id} expédiée` : status === 'prepared' ? `Commande #${id} préparée` : `Commande #${id} remise à préparer`);
+          showToast(status === 'shipped' ? `Commande #${id} expédiée${r.trackingNumber && r.payerEmail ? ' — email de suivi envoyé' : ''}` : status === 'prepared' ? `Commande #${id} préparée` : `Commande #${id} remise à préparer`);
           renderAll();
         }
       }
@@ -526,6 +547,16 @@
         <div class="foot">Édité par : ${esc(state.name)}</div>
       </div>`);
   }
+
+  function printLabels(orders) {
+    if (!window.AubeLabels) { showToast('Impression des étiquettes indisponible.'); return; }
+    AubeLabels.loadSender().then(sender => AubeLabels.print(orders, sender));
+  }
+  el('#print-labels').addEventListener('click', () => {
+    printLabels(state.orders
+      .filter(o => fulfillmentOf(o) === 'to_prepare')
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)));
+  });
 
   el('#print-picklist').addEventListener('click', printPickList);
   el('#print-all-slips').addEventListener('click', () => {
