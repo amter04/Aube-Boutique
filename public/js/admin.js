@@ -20,6 +20,7 @@
 
   // ---------- Auth ----------
   let role = null;
+  let staffName = '';
   let perms = [];
   let loginMode = 'admin';
   const can = (p) => role === 'admin' || perms.includes(p);
@@ -31,6 +32,7 @@
   async function checkAuth() {
     const res = await fetch('/api/admin/check');
     const data = await res.json();
+    staffName = data.name || '';
     if (data.role) showAdmin(data.role, data.permissions || []); else showLogin();
   }
 
@@ -1359,37 +1361,379 @@
     loadStats();
   });
 
-  // ---------- Orders ----------
-  async function loadOrders() {
+  // ---------- Commandes ----------
+  const CARRIERS = [['', 'Transporteur…'], ['colissimo', 'Colissimo'], ['mondial_relay', 'Mondial Relay'], ['chronopost', 'Chronopost'], ['dhl', 'DHL'], ['ups', 'UPS'], ['dpd', 'DPD'], ['gls', 'GLS'], ['autre', 'Autre']];
+  const ORD_STATE_LABEL = { to_prepare: 'À préparer', prepared: 'Préparée', shipped: 'Expédiée', review: 'À vérifier', cancelled: 'Annulée', refunded: 'Remboursée', other: 'Non payée' };
+  const ORD_PILLS = [['all', 'Toutes'], ['to_prepare', 'À préparer'], ['prepared', 'Préparées'], ['shipped', 'Expédiées'], ['review', 'À vérifier'], ['cancelled', 'Annulées / remboursées']];
+  const ord = { all: [], loaded: false, q: '', pill: 'all', preset: '', from: '', to: '', limit: 30, open: new Set(), sel: new Set() };
+
+  const parisDay = (d) => new Date(d).toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' }); // AAAA-MM-JJ
+
+  function ordState(o) {
+    if (o.status === 'paid') return o.fulfillmentStatus || 'to_prepare';
+    if (o.status === 'review') return 'review';
+    if (o.status === 'cancelled' || o.status === 'refunded') return 'cancelled';
+    return 'other';
+  }
+
+  function ordDateRange() {
+    const today = parisDay(Date.now());
+    const back = (n) => parisDay(Date.now() - n * 86400000);
+    switch (ord.preset) {
+      case 'today': return { from: today, to: today };
+      case '7': return { from: back(6), to: today };
+      case '30': return { from: back(29), to: today };
+      case 'month': return { from: today.slice(0, 8) + '01', to: today };
+      case 'custom': return { from: ord.from, to: ord.to };
+      default: return { from: '', to: '' };
+    }
+  }
+
+  function ordMatches(o, q) {
+    if (!q) return true;
+    const raw = q.trim().replace(/^#/, '');
+    if (/^\d+$/.test(raw) && raw.length <= 7) {
+      return String(o.id) === raw || (raw.length >= 6 && fold(o.trackingNumber).includes(raw));
+    }
+    const c = o.customer || {};
+    const hay = fold([o.id, o.payerName, o.payerEmail, c.name, c.email, c.address, c.postalCode, c.city, o.trackingNumber, o.paypalOrderId,
+      ...(o.items || []).map(i => i.name)].join(' '));
+    return fold(q).split(/\s+/).filter(Boolean).every(w => hay.includes(w));
+  }
+
+  function ordFiltered(ignorePill) {
+    const { from, to } = ordDateRange();
+    return ord.all.filter(o => {
+      if (!ignorePill && ord.pill !== 'all' && ordState(o) !== ord.pill) return false;
+      const day = parisDay(o.createdAt);
+      if (from && day < from) return false;
+      if (to && day > to) return false;
+      return ordMatches(o, ord.q);
+    });
+  }
+
+  async function loadOrders(silent) {
     const res = await fetch('/api/admin/orders');
     if (res.status === 401) return showLogin();
-    const orders = await res.json();
+    if (!res.ok) { el('#orders-list').innerHTML = `<p style="color:#918A80;">Tu n'as pas accès aux commandes.</p>`; return; }
+    ord.all = await res.json();
+    ord.loaded = true;
+    const ids = new Set(ord.all.map(o => o.id));
+    ord.sel = new Set([...ord.sel].filter(id => ids.has(id)));
+    el('#ord-csv').style.display = role === 'admin' ? '' : 'none';
+    renderOrders();
+  }
+
+  function ordItemsText(o) {
+    return (o.items || []).map(i => {
+      const v = [i.color, i.size && i.size !== 'TU' ? i.size : ''].filter(Boolean).join(' / ');
+      return `${esc(i.name)}${v ? ` (${esc(v)})` : ''} ×${i.qty}`;
+    });
+  }
+
+  function ordCardHtml(o) {
+    const st = ordState(o);
+    const stLabel = st === 'cancelled' ? (o.status === 'refunded' ? 'Remboursée' : 'Annulée') : ORD_STATE_LABEL[st];
+    const c = o.customer || {};
+    const name = o.payerName || c.name || 'Cliente';
+    const email = o.payerEmail || c.email || '';
+    const addr = [c.address, [c.postalCode, c.city].filter(Boolean).join(' '), c.country && c.country !== 'FR' ? c.country : ''].filter(Boolean);
+    const open = ord.open.has(o.id);
+    const notesCount = (o.internalNotes || []).length;
+    const canShip = o.status === 'paid';
+    const f = o.fulfillmentStatus || 'to_prepare';
+
+    let ship = '';
+    if (canShip) {
+      const mailInfo = o.shippedEmailAt
+        ? `<div class="ord-sub">✉ Email d'expédition envoyé le ${new Date(o.shippedEmailAt).toLocaleString('fr-FR')}.</div>`
+        : (f === 'shipped' ? `<div class="ord-sub">Aucun email d'expédition envoyé${email ? '' : ' (pas d\'adresse email)'}.</div>`
+          : `<div class="ord-sub">Un email avec le suivi part automatiquement à la cliente quand tu passes la commande en « expédiée ».</div>`);
+      ship = `
+        <h4 style="margin-top:14px;">Suivi du colis</h4>
+        <div class="ord-track">
+          <select class="ord-sel" data-f="carrier">${CARRIERS.map(([k, l]) => `<option value="${k}" ${o.carrier === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+          <input type="text" data-f="tracking" value="${esc(o.trackingNumber)}" placeholder="N° de suivi" maxlength="60">
+          <button type="button" class="btn secondary sm" data-a="save-track">Enregistrer</button>
+        </div>
+        ${o.trackingUrl ? `<div class="ord-sub"><a href="${esc(o.trackingUrl)}" target="_blank" rel="noopener">Ouvrir le suivi chez le transporteur ↗</a></div>` : ''}
+        ${mailInfo}`;
+    }
+
+    const stepBtns = !canShip ? '' :
+      f === 'to_prepare' ? `<button type="button" class="btn wine sm" data-a="status" data-s="prepared">✓ Marquer préparée</button>` :
+      f === 'prepared' ? `<button type="button" class="btn wine sm" data-a="status" data-s="shipped">📦 Marquer expédiée</button><button type="button" class="btn secondary sm" data-a="status" data-s="to_prepare">↩ À préparer</button>` :
+      `<button type="button" class="btn secondary sm" data-a="status" data-s="prepared">↩ Remettre « préparée »</button>${email ? `<button type="button" class="btn secondary sm" data-a="resend">✉ Renvoyer l'email d'expédition</button>` : ''}`;
+
+    const cancellable = ['paid', 'review'].includes(o.status) && can('refunds');
+    const cancelBtn = cancellable ? `<button type="button" class="btn danger-o sm" data-a="cancel">Annuler / rembourser…</button>` : '';
+
+    let cancelInfo = '';
+    if (o.cancellation) {
+      const k = o.cancellation;
+      cancelInfo = `<div class="ord-warn"><strong>${o.status === 'refunded' ? 'Annulée et remboursée' : 'Annulée'}</strong> le ${new Date(k.at).toLocaleString('fr-FR')} par ${esc(k.by)}${k.reason ? ` — « ${esc(k.reason)} »` : ''}.<br>
+        ${k.refundedCents > 0 ? `Remboursé : ${fmt(k.refundedCents / 100)}${k.viaPaypal ? ' via PayPal' : ' (hors PayPal)'}. ` : 'Aucun remboursement enregistré. '}
+        ${k.restocked ? 'Pièces remises en stock.' : 'Stock non modifié.'}${k.pointsAdjust ? ` Points de fidélité ajustés (${k.pointsAdjust > 0 ? '+' : ''}${k.pointsAdjust}).` : ''}</div>`;
+    }
+    const reviewInfo = o.status === 'review' ? `<div class="ord-warn">Le montant encaissé par PayPal ne correspond pas à la commande : vérifie dans PayPal avant d'expédier.</div>` : '';
+
+    const notes = (o.internalNotes || []).map(n => `
+      <div class="ord-note" data-note="${esc(n.id)}">
+        ${role === 'admin' || n.by === staffName ? `<button type="button" data-a="del-note" data-n="${esc(n.id)}">Supprimer</button>` : ''}
+        ${esc(n.text)}<small>${esc(n.by)} · ${new Date(n.at).toLocaleString('fr-FR')}</small>
+      </div>`).join('');
+
+    const history = (o.fulfillmentHistory || []).map(h => `${esc(ORD_STATE_LABEL[h.status] || h.status)} par ${esc(h.by)} (${new Date(h.at).toLocaleString('fr-FR')})`).join(' · ');
+
+    return `
+    <div class="ord ${open ? 'open' : ''} ${st === 'cancelled' ? 'is-cancelled' : ''}" data-id="${o.id}">
+      <div class="ord-head" data-a="toggle">
+        <input type="checkbox" data-a="sel" ${ord.sel.has(o.id) ? 'checked' : ''} aria-label="Sélectionner la commande ${o.id}">
+        <span class="ord-num">#${o.id}</span>
+        <span class="ord-who"><strong>${esc(name)}</strong><small>${new Date(o.createdAt).toLocaleString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}${c.city ? ` · ${esc(c.city)}` : ''}</small></span>
+        ${notesCount ? `<span class="ord-note-dot" title="${notesCount} note(s) interne(s)">📝${notesCount}</span>` : ''}
+        ${o.source === 'test' ? `<span class="ord-state test">Test</span>` : ''}
+        <span class="ord-state ${st}">${stLabel}</span>
+        <span class="ord-total">${fmt(o.total)}</span>
+      </div>
+      <div class="ord-body">
+        ${cancelInfo}${reviewInfo}
+        <div class="ord-cols">
+          <div>
+            <h4>Articles</h4>
+            <ul class="ord-items">${ordItemsText(o).map(t => `<li>${t}</li>`).join('')}</ul>
+            <div class="ord-sub">Sous-total ${fmt(o.subtotal)} + livraison ${fmt(o.shipping)}${o.discount > 0 ? ` − remise ${fmt(o.discount)}` : ''} = <strong>${fmt(o.total)}</strong></div>
+            ${(o.pointsEarned > 0 || o.pointsRedeemed > 0) ? `<div class="ord-sub" style="color:var(--wine);">${o.pointsEarned > 0 ? `+${o.pointsEarned} points gagnés` : ''}${o.pointsEarned > 0 && o.pointsRedeemed > 0 ? ' · ' : ''}${o.pointsRedeemed > 0 ? `${o.pointsRedeemed} points utilisés` : ''}</div>` : ''}
+            ${o.ext && o.ext.giftNote ? `<div class="ord-sub">🎁 « ${esc(o.ext.giftNote)} »</div>` : ''}
+          </div>
+          <div>
+            <h4>Cliente et livraison</h4>
+            <div><strong>${esc(name)}</strong></div>
+            ${email ? `<div><a href="mailto:${esc(email)}">${esc(email)}</a></div>` : ''}
+            <div class="ord-sub" style="margin-top:2px;">${addr.length ? addr.map(esc).join('<br>') : 'Adresse non renseignée'}</div>
+            ${ship}
+          </div>
+        </div>
+        <div class="ord-actions">
+          ${stepBtns}
+          <button type="button" class="btn secondary sm" data-a="label">🏷 Étiquette</button>
+          ${cancelBtn}
+        </div>
+        <div class="ord-notes">
+          <h4>Notes internes <span style="text-transform:none; letter-spacing:0;">(invisibles pour la cliente)</span></h4>
+          ${notes}
+          <div class="ord-note-form">
+            <input type="text" data-f="note" maxlength="1000" placeholder="Ex. : cliente rappelée, colis recontrôlé">
+            <button type="button" class="btn secondary sm" data-a="add-note">Ajouter</button>
+          </div>
+        </div>
+        ${history ? `<div class="ord-history">Historique : ${history}</div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  function renderOrders() {
     const list = el('#orders-list');
-    if (orders.length === 0) {
-      list.innerHTML = `<p style="color:#918A80;">Aucune commande pour le moment.</p>`;
+    if (!ord.loaded) return;
+    const base = ordFiltered(true);
+    const counts = { all: base.length };
+    base.forEach(o => { const s = ordState(o); counts[s] = (counts[s] || 0) + 1; });
+    const rows = ordFiltered(false).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const filtering = !!(ord.q || ord.preset || ord.pill !== 'all');
+
+    el('#ord-count').textContent = rows.length === ord.all.length ? `(${rows.length})` : `(${rows.length} sur ${ord.all.length})`;
+    el('#ord-pills').innerHTML = ORD_PILLS.map(([k, l]) => `<button type="button" class="cchip ${ord.pill === k ? 'on' : ''}" data-pill="${k}">${l}<small>${counts[k] || 0}</small></button>`).join('')
+      + `<button type="button" class="cchip-clear" data-a="check-all">Cocher les ${Math.min(rows.length, ord.limit)} affichées</button>`
+      + (ord.sel.size ? `<button type="button" class="cchip-clear" data-a="uncheck">Tout décocher</button>` : '')
+      + (filtering ? `<button type="button" class="cchip-clear" data-a="reset-filters">Effacer les filtres</button>` : '');
+    el('#ord-labels').disabled = ord.sel.size === 0;
+    el('#ord-labels-n').textContent = ord.sel.size;
+
+    if (!rows.length) {
+      list.innerHTML = `<p style="color:#918A80;">${ord.all.length ? 'Aucune commande ne correspond à ces filtres.' : 'Aucune commande pour le moment.'}</p>`;
+    } else {
+      list.innerHTML = rows.slice(0, ord.limit).map(ordCardHtml).join('');
+    }
+    const more = el('#ord-more');
+    more.style.display = rows.length > ord.limit ? '' : 'none';
+    more.textContent = `Afficher plus (${rows.length - ord.limit} restantes)`;
+  }
+
+  function ordReplace(updated) {
+    const i = ord.all.findIndex(o => o.id === updated.id);
+    if (i >= 0) ord.all[i] = updated;
+  }
+
+  async function ordRequest(url, method, body) {
+    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    if (res.status === 401) { showLogin(); return null; }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || 'Action impossible'); return null; }
+    return data;
+  }
+
+  function ordCancelDialog(o) {
+    const shipped = (o.fulfillmentStatus || 'to_prepare') === 'shipped';
+    const isPaypal = o.source === 'paypal';
+    const isTest = o.source === 'test';
+    const email = o.payerEmail || (o.customer && o.customer.email) || '';
+    let refundBlock = '';
+    if (isTest) {
+      refundBlock = `<p class="hint">Commande de test : aucun argent n'a été encaissé, donc rien à rembourser.</p>`;
+    } else if (isPaypal && !o.hasCapture) {
+      refundBlock = `<p class="ord-warn">Cette commande PayPal n'a pas de paiement enregistré : rembourse-la depuis ton compte PayPal, puis annule ici sans rembourser.</p>`;
+    } else {
+      refundBlock = `
+        <label class="check-line"><input type="checkbox" id="cx-refund" checked> ${isPaypal ? 'Rembourser la cliente sur PayPal' : 'Je l\'ai remboursée par ailleurs (à noter dans l\'historique)'}</label>
+        <div id="cx-amount-row" style="margin:0 0 8px 26px;"><label for="cx-amount" style="font-size:13px;">Montant à rembourser (max ${fmt(o.total)})</label>
+          <input type="number" id="cx-amount" min="0.01" max="${o.total}" step="0.01" value="${o.total.toFixed(2)}"></div>`;
+    }
+    const body = `
+      <div class="ord-cancel-form">
+        <p>Commande <strong>#${o.id}</strong> de ${esc(o.payerName || 'la cliente')} — <strong>${fmt(o.total)}</strong>.${shipped ? ' <br><span style="color:#8B2A2A;">Elle est déjà marquée « expédiée ».</span>' : ''}</p>
+        <label for="cx-reason" style="font-size:13px;">Raison (visible dans l'historique${email ? ' et dans l\'email à la cliente' : ''})</label>
+        <textarea id="cx-reason" rows="2" maxlength="300" placeholder="Ex. : article défectueux, demande de la cliente…"></textarea>
+        <label class="check-line"><input type="checkbox" id="cx-restock" ${shipped ? '' : 'checked'}> Remettre les pièces en stock${shipped ? ' (décoche si le colis ne revient pas)' : ''}</label>
+        ${refundBlock}
+        <label class="check-line"><input type="checkbox" id="cx-notify" ${email ? 'checked' : 'disabled'}> Prévenir la cliente par email${email ? '' : ' (pas d\'adresse)'}</label>
+        <p class="hint">Les points de fidélité gagnés sur cette commande seront retirés et ceux utilisés rendus.</p>
+      </div>`;
+    const m = showModal(`Annuler la commande #${o.id}`, body, [
+      { label: 'Retour' },
+      {
+        label: 'Confirmer l\'annulation', cls: 'wine', id: 'ok',
+        onClick: async () => {
+          const q = (s) => m.body.querySelector(s);
+          const refund = !!(q('#cx-refund') && q('#cx-refund').checked);
+          const payload = {
+            reason: q('#cx-reason').value.trim(),
+            restock: q('#cx-restock').checked,
+            refund,
+            notify: q('#cx-notify').checked
+          };
+          if (refund) payload.refundAmount = q('#cx-amount').value;
+          const out = await ordRequest(`/api/admin/orders/${o.id}/cancel`, 'POST', payload);
+          if (!out) return false;
+          ordReplace(out);
+          renderOrders();
+          showToast(refund && out.cancellation && out.cancellation.refundedCents > 0 ? `Commande #${o.id} annulée et remboursée` : `Commande #${o.id} annulée`);
+          loadStats(); if (can('catalogue')) loadProducts();
+        }
+      }
+    ]);
+    const cb = m.body.querySelector('#cx-refund');
+    if (cb) cb.addEventListener('change', () => { m.body.querySelector('#cx-amount-row').style.display = cb.checked ? '' : 'none'; });
+  }
+
+  function printOrderLabels(orders) {
+    if (!window.AubeLabels) return showToast('Impression des étiquettes indisponible.');
+    AubeLabels.loadSender().then(sender => {
+      const start = orders.length > 0 ? prompt('Combien d\'étiquettes de la première planche sont déjà utilisées ? (0 si planche neuve)', '0') : '0';
+      if (start === null) return;
+      AubeLabels.print(orders, sender, start);
+    });
+  }
+
+  el('#orders-list').addEventListener('click', async (e) => {
+    const t = e.target.closest('[data-a]');
+    const card = e.target.closest('.ord');
+    if (!t || !card) return;
+    const id = parseInt(card.dataset.id, 10);
+    const o = ord.all.find(x => x.id === id);
+    if (!o) return;
+    const a = t.dataset.a;
+    if (a === 'sel') {
+      if (t.checked) ord.sel.add(id); else ord.sel.delete(id);
+      el('#ord-labels').disabled = ord.sel.size === 0;
+      el('#ord-labels-n').textContent = ord.sel.size;
       return;
     }
-    list.innerHTML = orders.map(o => {
-      const customer = o.customer || {};
-      const address = [customer.address, customer.postalCode, customer.city].filter(Boolean).join(', ');
-      return `
-      <div class="order-row">
-        <div class="top">
-          <strong>${fmt(o.total)}</strong>
-          <span>
-            ${o.source === 'test' ? `<span class="status-pill test">Test</span>` : ''}
-            <span class="status-pill ${o.status === 'paid' ? 'paid' : 'created'}">${o.status === 'paid' ? 'Payée' : o.status}</span>
-          </span>
-        </div>
-        <div style="color:#77706A;">${esc(o.payerName || 'Client')} ${o.payerEmail ? `· ${esc(o.payerEmail)}` : ''}</div>
-        ${address ? `<div style="color:#918A80; font-size:13px;">${esc(address)}</div>` : ''}
-        <div style="color:#918A80; font-size:13px;">${new Date(o.createdAt).toLocaleString('fr-FR')} · ${o.items.map(i => `${esc(i.name)}${(i.color || (i.size && i.size !== 'TU')) ? ` (${esc([i.color, i.size && i.size !== 'TU' ? i.size : ''].filter(Boolean).join(' / '))})` : ''} ×${i.qty}`).join(', ')}</div>
-        <div style="color:#918A80; font-size:12.5px; margin-top:4px;">Sous-total ${fmt(o.subtotal)} + livraison ${fmt(o.shipping)}${o.discount > 0 ? ` − ${fmt(o.discount)}` : ''}</div>
-        ${(o.pointsEarned > 0 || o.pointsRedeemed > 0) ? `<div style="color:var(--wine); font-size:12.5px; margin-top:2px;">${o.pointsEarned > 0 ? `+${o.pointsEarned} points gagnés` : ''}${o.pointsEarned > 0 && o.pointsRedeemed > 0 ? ' · ' : ''}${o.pointsRedeemed > 0 ? `${o.pointsRedeemed} points utilisés` : ''}</div>` : ''}
-      </div>
-    `;
-    }).join('');
-  }
+    if (a === 'toggle') {
+      if (e.target.matches('input, a')) return;
+      if (ord.open.has(id)) ord.open.delete(id); else ord.open.add(id);
+      card.classList.toggle('open');
+      return;
+    }
+    if (a === 'label') return printOrderLabels([o]);
+    if (a === 'cancel') return ordCancelDialog(o);
+
+    t.disabled = true;
+    try {
+      if (a === 'save-track' || (a === 'status')) {
+        const body = {};
+        const tr = card.querySelector('[data-f="tracking"]');
+        const cr = card.querySelector('[data-f="carrier"]');
+        if (tr) body.trackingNumber = tr.value.trim();
+        if (cr) body.carrier = cr.value;
+        if (a === 'status') {
+          body.status = t.dataset.s;
+          if (body.status === 'shipped' && !(body.trackingNumber || o.trackingNumber) && !confirm("Aucun numéro de suivi n'est renseigné : l'email d'expédition partira sans lien de suivi. Continuer ?")) return;
+        }
+        const out = await ordRequest(`/api/admin/orders/${id}/fulfillment`, 'PATCH', body);
+        if (out) {
+          ordReplace(out); renderOrders();
+          if (a === 'save-track') showToast('Suivi enregistré');
+          else if (body.status === 'shipped') {
+            showToast(out.payerEmail || (out.customer && out.customer.email) ? `Commande #${id} expédiée — email envoyé à la cliente` : `Commande #${id} expédiée (pas d'adresse email)`);
+            setTimeout(() => loadOrders(true), 3000); // l'email part juste après : on rafraîchit pour afficher « envoyé le… »
+          } else showToast('Statut mis à jour');
+        }
+      } else if (a === 'resend') {
+        const out = await ordRequest(`/api/admin/orders/${id}/resend-shipping`, 'POST');
+        if (out) { ordReplace(out); renderOrders(); showToast('Email d\'expédition renvoyé'); }
+      } else if (a === 'add-note') {
+        const inp = card.querySelector('[data-f="note"]');
+        const text = inp.value.trim();
+        if (!text) return;
+        const out = await ordRequest(`/api/admin/orders/${id}/notes`, 'POST', { text });
+        if (out) { ordReplace(out); renderOrders(); showToast('Note ajoutée'); }
+      } else if (a === 'del-note') {
+        if (!confirm('Supprimer cette note ?')) return;
+        const out = await ordRequest(`/api/admin/orders/${id}/notes/${encodeURIComponent(t.dataset.n)}`, 'DELETE');
+        if (out) { ordReplace(out); renderOrders(); }
+      }
+    } finally { t.disabled = false; }
+  });
+
+  el('#orders-list').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.matches('[data-f="note"]')) { e.preventDefault(); e.target.closest('.ord').querySelector('[data-a="add-note"]').click(); }
+    if (e.key === 'Enter' && e.target.matches('[data-f="tracking"]')) { e.preventDefault(); e.target.closest('.ord').querySelector('[data-a="save-track"]').click(); }
+  });
+
+  el('#ord-pills').addEventListener('click', (e) => {
+    const pill = e.target.closest('[data-pill]');
+    if (pill) { ord.pill = pill.dataset.pill; ord.limit = 30; return renderOrders(); }
+    const a = e.target.closest('[data-a]');
+    if (!a) return;
+    if (a.dataset.a === 'check-all') {
+      ordFiltered(false).sort((x, y) => new Date(y.createdAt) - new Date(x.createdAt)).slice(0, ord.limit).forEach(o => ord.sel.add(o.id));
+    } else if (a.dataset.a === 'uncheck') {
+      ord.sel.clear();
+    } else if (a.dataset.a === 'reset-filters') {
+      Object.assign(ord, { q: '', pill: 'all', preset: '', from: '', to: '', limit: 30 });
+      el('#ord-search').value = ''; el('#ord-preset').value = ''; el('#ord-from').value = ''; el('#ord-to').value = '';
+      el('#ord-range').style.display = 'none';
+    }
+    renderOrders();
+  });
+
+  let ordSearchTimer;
+  el('#ord-search').addEventListener('input', (e) => {
+    clearTimeout(ordSearchTimer);
+    ordSearchTimer = setTimeout(() => { ord.q = e.target.value; ord.limit = 30; renderOrders(); }, 150);
+  });
+  el('#ord-preset').addEventListener('change', (e) => {
+    ord.preset = e.target.value; ord.limit = 30;
+    el('#ord-range').style.display = ord.preset === 'custom' ? 'inline-flex' : 'none';
+    renderOrders();
+  });
+  el('#ord-from').addEventListener('change', (e) => { ord.from = e.target.value; ord.limit = 30; renderOrders(); });
+  el('#ord-to').addEventListener('change', (e) => { ord.to = e.target.value; ord.limit = 30; renderOrders(); });
+  el('#ord-more').addEventListener('click', () => { ord.limit += 30; renderOrders(); });
+  el('#ord-labels').addEventListener('click', () => {
+    const picked = ord.all.filter(o => ord.sel.has(o.id)).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    printOrderLabels(picked);
+  });
 
   // ---------- Init ----------
   renderSizeGrid([]);
