@@ -59,13 +59,8 @@
       t.style.display = can(t.dataset.perm) ? '' : 'none';
     });
     if (can('catalogue')) loadProducts();
-    if (role === 'admin') {
-      loadStats();
-      loadSettings();
-      selectTab('dashboard');
-    } else {
-      selectTab('orders');
-    }
+    if (role === 'admin') { loadStats(); loadSettings(); }
+    selectTab(can('dashboard') ? 'dashboard' : 'orders');
   }
 
   function setLoginMode(mode) {
@@ -108,7 +103,7 @@
       if (tabEl) tabEl.style.display = name === target ? 'block' : 'none';
     });
     if (target === 'orders') loadOrders();
-    if (target === 'dashboard') loadStats();
+    if (target === 'dashboard') { loadStats(); loadDashboard(); }
     if (target === 'customers') loadCustomers();
     if (target === 'promos') loadPromos();
     if (target === 'reviews') loadAdminReviews();
@@ -263,26 +258,245 @@
   });
 
   // ---------- Clients ----------
+  // ---------- Clientes ----------
+  const cu = { all: [], q: '', sort: 'recent' };
+  const dayFr = (iso) => iso ? new Date(iso).toLocaleDateString('fr-FR') : '—';
+  const dateTimeFr = (iso) => new Date(iso).toLocaleString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const ORDER_STATUS_FR = { paid: 'Payée', review: 'À vérifier', cancelled: 'Annulée', refunded: 'Remboursée' };
+
   async function loadCustomers() {
     const res = await fetch('/api/admin/customers');
     if (res.status === 401) return showLogin();
-    const customers = await res.json();
-    el('#customers-count').textContent = `${customers.length} client${customers.length > 1 ? 'e' : ''}${customers.length > 1 ? 's' : ''}`;
-    const tbody = el('#customer-rows');
-    if (customers.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="5" style="color:#918A80; padding:18px 10px;">Aucun compte client créé pour le moment.</td></tr>`;
-      return;
-    }
-    tbody.innerHTML = customers.map(c => `
-      <tr>
-        <td>${esc(c.name)}</td>
-        <td>${esc(c.email)}</td>
-        <td><strong>${c.points}</strong></td>
-        <td>${c.ordersCount}</td>
-        <td>${new Date(c.createdAt).toLocaleDateString('fr-FR')}</td>
-      </tr>
-    `).join('');
+    if (!res.ok) { el('#customer-rows').innerHTML = `<tr><td colspan="6" style="padding:18px 10px;color:#918A80;">Tu n'as pas accès aux clientes.</td></tr>`; return; }
+    cu.all = await res.json();
+    renderCustomers();
   }
+
+  function renderCustomers() {
+    const words = fold(cu.q).split(/\s+/).filter(Boolean);
+    let rows = cu.all.filter(c => { const h = fold(c.name + ' ' + c.email); return words.every(w => h.includes(w)); });
+    const sorts = {
+      recent: (a, b) => new Date(b.createdAt) - new Date(a.createdAt),
+      spent: (a, b) => b.totalSpent - a.totalSpent,
+      orders: (a, b) => b.ordersCount - a.ordersCount,
+      last: (a, b) => new Date(b.lastOrderAt || 0) - new Date(a.lastOrderAt || 0),
+      points: (a, b) => b.points - a.points,
+      name: (a, b) => a.name.localeCompare(b.name, 'fr')
+    };
+    rows.sort(sorts[cu.sort] || sorts.recent);
+    el('#customers-count').textContent = rows.length === cu.all.length ? `(${rows.length})` : `(${rows.length} sur ${cu.all.length})`;
+    el('#customer-rows').innerHTML = rows.length ? rows.map(c => `
+      <tr data-id="${c.id}">
+        <td><strong>${esc(c.name)}</strong></td>
+        <td>${esc(c.email)}</td>
+        <td>${c.ordersCount}</td>
+        <td>${c.totalSpent > 0 ? fmt(c.totalSpent) : '—'}</td>
+        <td>${dayFr(c.lastOrderAt)}</td>
+        <td><strong>${c.points}</strong></td>
+      </tr>`).join('')
+      : `<tr><td colspan="6" style="color:#918A80; padding:18px 10px;">${cu.all.length ? 'Aucune cliente ne correspond.' : 'Aucun compte client créé pour le moment.'}</td></tr>`;
+  }
+
+  el('#cu-search').addEventListener('input', (e) => { cu.q = e.target.value; renderCustomers(); });
+  el('#cu-sort').addEventListener('change', (e) => { cu.sort = e.target.value; renderCustomers(); });
+  el('#customer-rows').addEventListener('click', (e) => {
+    const tr = e.target.closest('tr[data-id]');
+    if (tr) openCustomer(parseInt(tr.dataset.id, 10));
+  });
+
+  function customerFicheHtml(c) {
+    const log = (c.pointsLog || []).slice(0, 20).map(l =>
+      `<div><strong style="color:${l.delta >= 0 ? 'var(--ok)' : '#8B2A2A'}">${l.delta > 0 ? '+' : ''}${l.delta}</strong> — ${esc(l.reason)} <span style="color:var(--soft)">· ${esc(l.by)}, ${dateTimeFr(l.at)} · solde ${l.balanceAfter}</span></div>`).join('');
+    const orders = (c.orders || []).map(o => `
+      <tr>
+        <td><strong>#${o.id}</strong><small>${dateTimeFr(o.createdAt)}</small></td>
+        <td>${esc(o.items.join(', '))}${o.guest ? '<small>Commande passée sans compte (même email)</small>' : ''}</td>
+        <td style="white-space:nowrap;text-align:right;">${fmt(o.total)}<small>${ORDER_STATUS_FR[o.status] || o.status}${o.status === 'paid' ? ' · ' + ({ to_prepare: 'à préparer', prepared: 'préparée', shipped: 'expédiée' }[o.fulfillmentStatus] || '') : ''}</small></td>
+      </tr>`).join('');
+    const isAdmin = role === 'admin';
+    return `
+    <div class="cu-fiche">
+      <p style="margin:0 0 12px;"><a href="mailto:${esc(c.email)}">${esc(c.email)}</a> · inscrite le ${dayFr(c.createdAt)}${c.hasLoginAccount ? '' : ' · <em>sans compte de connexion</em>'}</p>
+      <div class="cu-kpis">
+        <div class="cu-kpi"><strong>${fmt(c.totalSpent)}</strong><span>Total dépensé</span></div>
+        <div class="cu-kpi"><strong>${c.paidCount}</strong><span>Commande${c.paidCount > 1 ? 's' : ''} payée${c.paidCount > 1 ? 's' : ''}</span></div>
+        <div class="cu-kpi"><strong>${c.paidCount ? fmt(c.avgBasket) : '—'}</strong><span>Panier moyen</span></div>
+        <div class="cu-kpi"><strong>${c.points}</strong><span>Points</span></div>
+        <div class="cu-kpi"><strong>${dayFr(c.lastOrderAt)}</strong><span>Dernière commande</span></div>
+        <div class="cu-kpi"><strong>${c.reviewsCount}</strong><span>Avis</span></div>
+      </div>
+
+      <h4>Commandes</h4>
+      ${orders ? `<table class="cu-orders"><tbody>${orders}</tbody></table>` : '<p class="dash-empty">Aucune commande.</p>'}
+
+      <h4>Ajuster les points</h4>
+      <div class="cu-pts">
+        <input type="number" id="cu-delta" step="1" placeholder="+50 ou -20" aria-label="Points à ajouter ou retirer">
+        <input type="text" id="cu-reason" maxlength="200" placeholder="Motif (geste commercial, erreur…)" aria-label="Motif">
+        <button type="button" class="btn wine sm" id="cu-apply">Appliquer</button>
+      </div>
+      <div class="cu-log">${log || '<span class="dash-empty">Aucun ajustement ni mouvement de points enregistré.</span>'}</div>
+
+      ${isAdmin ? `
+      <div class="cu-rgpd">
+        <span class="hint" style="flex:1 1 100%;margin:0;">Droits RGPD (sur demande de la cliente) :</span>
+        <a class="btn secondary sm" href="/api/admin/customers/${c.id}/export" download>⬇ Exporter ses données</a>
+        <button type="button" class="btn danger-o sm" id="cu-delete">Supprimer son compte…</button>
+      </div>` : ''}
+    </div>`;
+  }
+
+  async function openCustomer(id) {
+    const res = await fetch(`/api/admin/customers/${id}`);
+    if (res.status === 401) return showLogin();
+    const c = await res.json();
+    if (!res.ok) return showToast(c.error || 'Cliente introuvable');
+    const m = showModal(c.name, customerFicheHtml(c), [{ label: 'Fermer' }], { wide: true });
+    wireCustomer(m, c);
+  }
+
+  function wireCustomer(m, c) {
+    const q = (s) => m.body.querySelector(s);
+    q('#cu-apply').addEventListener('click', async () => {
+      const delta = parseInt(q('#cu-delta').value, 10);
+      const reason = q('#cu-reason').value.trim();
+      if (!Number.isInteger(delta) || delta === 0) return showToast('Indique un nombre de points (ex. 50 ou -20).');
+      if (!reason) return showToast('Indique un motif.');
+      const r = await fetch(`/api/admin/customers/${c.id}/points`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ delta, reason }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return showToast(d.error || 'Ajustement impossible');
+      showToast(`Points mis à jour : ${d.points}`);
+      c.points = d.points; c.pointsLog = d.pointsLog;
+      m.body.innerHTML = customerFicheHtml(c);
+      wireCustomer(m, c);
+      const row = cu.all.find(x => x.id === c.id); if (row) row.points = d.points;
+      renderCustomers();
+    });
+    const del = q('#cu-delete');
+    if (del) del.addEventListener('click', () => {
+      m.close();
+      const body = `
+        <div class="cu-del">
+          <p>Le compte de <strong>${esc(c.name)}</strong> (${esc(c.email)}) sera supprimé définitivement, ainsi que ses avis et ses alertes de stock. <strong>Cette action est irréversible.</strong></p>
+          <p class="hint">Les commandes sont conservées (obligation comptable de 10 ans) mais détachées du compte.</p>
+          <label class="check-line"><input type="checkbox" id="cu-anon"> Effacer aussi le nom, l'email et l'adresse sur ses commandes (anonymisation)</label>
+          <label for="cu-confirm" style="font-size:13px;">Pour confirmer, retape son adresse email :</label>
+          <input type="email" id="cu-confirm" autocomplete="off" placeholder="${esc(c.email)}">
+        </div>`;
+      const m2 = showModal('Supprimer le compte', body, [
+        { label: 'Retour', onClick: () => { openCustomer(c.id); } },
+        {
+          label: 'Supprimer définitivement', cls: 'wine',
+          onClick: async () => {
+            const r = await fetch(`/api/admin/customers/${c.id}/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ confirmEmail: m2.body.querySelector('#cu-confirm').value, anonymizeOrders: m2.body.querySelector('#cu-anon').checked }) });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { showToast(d.error || 'Suppression impossible'); return false; }
+            showToast('Compte supprimé');
+            loadCustomers();
+          }
+        }
+      ]);
+    });
+  }
+
+  // ---------- Tableau de bord : ventes, classements ----------
+  const dash = { days: 30, data: null };
+
+  async function loadDashboard() {
+    if (!can('dashboard')) return;
+    const res = await fetch(`/api/admin/dashboard?days=${dash.days}`);
+    if (res.status === 401) return showLogin();
+    if (!res.ok) return;
+    dash.data = await res.json();
+    el('#dash-panel').style.display = '';
+    renderDashboard();
+  }
+
+  function delta(cur, prev) {
+    if (!prev) return cur > 0 ? '<em class="up">nouveau</em>' : '';
+    const p = Math.round(((cur - prev) / prev) * 100);
+    return `<em class="${p >= 0 ? 'up' : 'down'}">${p >= 0 ? '▲ +' : '▼ '}${p}%</em>`;
+  }
+
+  function renderDashboard() {
+    const d = dash.data;
+    if (!d) return;
+    el('#dash-period').querySelectorAll('[data-days]').forEach(b => b.classList.toggle('on', parseInt(b.dataset.days, 10) === d.days));
+    const t = d.totals;
+    el('#dash-kpis').innerHTML = `
+      <div class="dash-kpi"><strong>${fmt(t.revenue)}</strong><span>Chiffre d'affaires ${delta(t.revenue, d.previous.revenue)}</span></div>
+      <div class="dash-kpi"><strong>${t.orders}</strong><span>Commandes ${delta(t.orders, d.previous.orders)}</span></div>
+      <div class="dash-kpi"><strong>${t.orders ? fmt(t.avgBasket) : '—'}</strong><span>Panier moyen</span></div>
+      <div class="dash-kpi"><strong>${t.units}</strong><span>Pièces vendues</span></div>
+      <div class="dash-kpi"><strong>${d.promo.rate} %</strong><span>Commandes avec code promo</span></div>`;
+    drawSalesChart(d);
+
+    const maxU = Math.max(1, ...d.bestSellers.map(b => b.units));
+    el('#dash-best').innerHTML = d.bestSellers.length ? d.bestSellers.map((b, i) => `
+      <div class="dash-row">
+        ${b.image ? `<img src="${esc(b.image)}" alt="" loading="lazy">` : '<span class="no-thumb"></span>'}
+        <div class="grow"><strong>${i + 1}. ${esc(b.name)}</strong>${b.archived ? ' <small style="display:inline">(archivée)</small>' : ''}
+          <small>${b.reference ? esc(b.reference) + ' · ' : ''}${fmt(b.revenue)}</small>
+          <div class="dash-bar"><i style="width:${Math.round(b.units / maxU * 100)}%"></i></div></div>
+        <strong>${b.units}</strong>
+      </div>`).join('') : '<p class="dash-empty">Aucune vente sur la période.</p>';
+
+    el('#dash-low').innerHTML = d.lowStock.length ? d.lowStock.map(p => `
+      <div class="dash-row">
+        ${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy">` : '<span class="no-thumb"></span>'}
+        <div class="grow"><strong>${esc(p.name)}</strong>
+          <small>${p.reference ? esc(p.reference) + ' · ' : ''}${p.variants.map(v => `${esc([v.color, v.size !== 'TU' ? v.size : ''].filter(Boolean).join(' ') || 'Taille unique')} : <span class="${v.stock === 0 ? 'dash-low-warn' : ''}">${v.stock === 0 ? 'épuisé' : v.stock}</span>`).join(' · ')}</small></div>
+      </div>`).join('') : `<p class="dash-empty">Rien à signaler : aucune pièce à ${d.lowStockThreshold} exemplaires ou moins.</p>`;
+
+    const pr = d.promo;
+    el('#dash-promo').innerHTML = pr.codes.length ? `
+      <p style="margin:0 0 8px;font-size:14px;"><strong>${pr.ordersWithCode}</strong> commande${pr.ordersWithCode > 1 ? 's' : ''} sur ${pr.ordersTotal} (${pr.rate} %) ${pr.ordersWithCode > 1 ? 'ont' : 'a'} utilisé un code promo.</p>
+      <div style="overflow-x:auto;"><table class="product-table"><thead><tr><th>Code</th><th>Commandes</th><th>Part des commandes</th><th>Remises accordées</th><th>CA généré</th></tr></thead><tbody>
+      ${pr.codes.map(c => `<tr><td><strong>${esc(c.code)}</strong></td><td>${c.orders}</td><td>${c.rate} %</td><td>${fmt(c.discount)}</td><td>${fmt(c.revenue)}</td></tr>`).join('')}
+      </tbody></table></div>` : '<p class="dash-empty">Aucun code promo utilisé sur la période.</p>';
+  }
+
+  function drawSalesChart(d) {
+    const box = el('#dash-chart');
+    const W = Math.max(280, box.clientWidth || 700), H = 230;
+    const m = { l: 46, r: 12, t: 12, b: 26 };
+    const pts = d.series;
+    const max = Math.max(1, ...pts.map(p => p.revenue));
+    const nice = (v) => { const e = Math.pow(10, Math.floor(Math.log10(v))); const f = v / e; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * e; };
+    const top = nice(max);
+    const x = (i) => m.l + (pts.length === 1 ? 0 : i * (W - m.l - m.r) / (pts.length - 1));
+    const y = (v) => m.t + (1 - v / top) * (H - m.t - m.b);
+    const line = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.revenue).toFixed(1)}`).join('');
+    const area = `${line}L${x(pts.length - 1).toFixed(1)},${y(0)}L${x(0).toFixed(1)},${y(0)}Z`;
+    const grid = [0, .5, 1].map(f => `<line class="gl" x1="${m.l}" x2="${W - m.r}" y1="${y(top * f)}" y2="${y(top * f)}"/><text x="${m.l - 6}" y="${y(top * f) + 4}" text-anchor="end">${Math.round(top * f)} €</text>`).join('');
+    const step = Math.ceil(pts.length / (W < 480 ? 4 : 7));
+    const labels = pts.map((p, i) => (i % step === 0 || i === pts.length - 1) && (pts.length - 1 - i >= step / 2 || i === pts.length - 1)
+      ? `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${p.date.slice(8)}/${p.date.slice(5, 7)}</text>` : '').join('');
+    box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Courbe du chiffre d'affaires par jour">${grid}<path class="area" d="${area}"/><path class="ln" d="${line}"/>${labels}<circle class="dot" r="5" cx="-10" cy="-10" style="display:none"/><rect x="0" y="0" width="${W}" height="${H}" fill="transparent" class="hit"/></svg><div class="dash-tip"></div>`;
+    const svg = box.querySelector('svg'), tip = box.querySelector('.dash-tip'), dot = box.querySelector('.dot');
+    const show = (clientX) => {
+      const r = svg.getBoundingClientRect();
+      const px = (clientX - r.left) * (W / r.width);
+      let i = Math.round((px - m.l) / ((W - m.l - m.r) / Math.max(1, pts.length - 1)));
+      i = Math.max(0, Math.min(pts.length - 1, i));
+      const p = pts[i];
+      dot.style.display = ''; dot.setAttribute('cx', x(i)); dot.setAttribute('cy', y(p.revenue));
+      tip.style.display = 'block'; tip.style.left = (x(i) * r.width / W) + 'px'; tip.style.top = (y(p.revenue) * r.height / H) + 'px';
+      tip.textContent = `${new Date(p.date + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })} : ${fmt(p.revenue)} · ${p.orders} commande${p.orders > 1 ? 's' : ''}`;
+    };
+    svg.addEventListener('mousemove', (e) => show(e.clientX));
+    svg.addEventListener('touchstart', (e) => show(e.touches[0].clientX), { passive: true });
+    svg.addEventListener('touchmove', (e) => show(e.touches[0].clientX), { passive: true });
+    svg.addEventListener('mouseleave', () => { tip.style.display = 'none'; dot.style.display = 'none'; });
+  }
+
+  el('#dash-period').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-days]');
+    if (b) { dash.days = parseInt(b.dataset.days, 10); loadDashboard(); }
+  });
+  let dashResize;
+  window.addEventListener('resize', () => { clearTimeout(dashResize); dashResize = setTimeout(() => { if (dash.data && el('#tab-dashboard').style.display !== 'none') drawSalesChart(dash.data); }, 150); });
 
   // ---------- Codes promo ----------
   async function loadPromos() {
