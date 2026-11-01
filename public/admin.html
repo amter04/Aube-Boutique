@@ -112,12 +112,33 @@
   </section>
 
   <section id="tab-orders" style="display:none;">
-    <div class="panel" style="max-width:820px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;">
-        <h3 style="margin:0;">Commandes reçues</h3>
-        <a href="/api/admin/orders/export.csv" class="btn secondary" style="padding:8px 16px; font-size:13px;" download>Exporter en CSV</a>
+    <div class="panel cat-panel" style="max-width:980px;">
+      <div class="cat-head">
+        <h3>Commandes <span class="cat-count" id="ord-count"></span></h3>
+        <div class="cat-actions">
+          <button type="button" class="btn secondary sm" id="ord-labels" disabled>🏷 Étiquettes (<span id="ord-labels-n">0</span>)</button>
+          <a href="/api/admin/orders/export.csv" class="btn secondary sm" id="ord-csv" download>Exporter en CSV</a>
+        </div>
       </div>
-      <div class="orders-list" id="orders-list"></div>
+      <div class="ord-tools">
+        <div class="cat-search-box"><input type="search" id="ord-search" placeholder="N° de commande, nom, email, ville, n° de suivi…" autocomplete="off"></div>
+        <div class="ord-dates">
+          <select id="ord-preset" aria-label="Période">
+            <option value="">Toutes les dates</option>
+            <option value="today">Aujourd'hui</option>
+            <option value="7">7 derniers jours</option>
+            <option value="30">30 derniers jours</option>
+            <option value="month">Ce mois-ci</option>
+            <option value="custom">Dates précises…</option>
+          </select>
+          <span class="ord-range" id="ord-range" style="display:none;">
+            <input type="date" id="ord-from" aria-label="Du"> <span>→</span> <input type="date" id="ord-to" aria-label="Au">
+          </span>
+        </div>
+      </div>
+      <div class="cchips" id="ord-pills"></div>
+      <div id="orders-list"></div>
+      <div style="text-align:center; margin-top:14px;"><button type="button" class="btn secondary sm" id="ord-more" style="display:none;">Afficher plus</button></div>
     </div>
   </section>
 
@@ -416,6 +437,7 @@
 
 <div class="toast" id="toast"></div>
 
+<script src="/js/labels.js"></script>
 <script src="/js/admin.js"></script>
 </body>
 </html>
