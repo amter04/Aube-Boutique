@@ -1397,14 +1397,7 @@ function mountRoutes() {
     res.json({ ok: true, settings });
   }));
 
-  app.get('/api/admin/customers', requireAdmin, asyncHandler(async (req, res) => {
-    const data = await store.load();
-    const counts = new Map();
-    data.orders.forEach(o => { if (o.customerId) counts.set(o.customerId, (counts.get(o.customerId) || 0) + 1); });
-    res.json([...data.customers].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(c => ({
-      id: c.id, name: c.name, email: c.email, points: c.points || 0, ordersCount: counts.get(c.id) || 0, createdAt: c.createdAt
-    })));
-  }));
+  // Liste, fiche, points, export et suppression des clientes : features/admin-clientes.js
 
   // ----- Produits -----
   app.get('/api/admin/products', requireStaff, asyncHandler(async (req, res) => {
