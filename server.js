@@ -39,7 +39,7 @@ const MAX_QTY_PER_LINE = 20;
 const STAFF_SESSION_MS = 8 * 60 * 60 * 1000;          // patron / employé : 8 h
 const CUSTOMER_SESSION_MS = 30 * 24 * 60 * 60 * 1000; // cliente : 30 jours
 const STAFF_CHECK_TTL_MS = 15 * 1000;                  // un employé désactivé perd l'accès en 15 s au plus
-const RESERVATION_MS = 30 * 60 * 1000;               // stock + points réservés 30 min pendant un paiement PayPal
+const RESERVATION_MS = 15 * 60 * 1000;               // stock + points réservés 15 min pendant un paiement PayPal
 const PASSWORD_MIN = 8;
 const PASSWORD_MAX = 200;
 
@@ -207,6 +207,9 @@ const customerLoginMailLimiter = createAttemptLimiter({ name: 'cust-login-mail',
 const registerLimiter = createRequestLimiter({ name: 'register', max: 6, windowMs: 60 * 60 * 1000 });
 const checkoutLimiter = createRequestLimiter({ name: 'checkout', max: 15, windowMs: 60 * 60 * 1000 });
 const paypalLimiter = createRequestLimiter({ name: 'paypal', max: 40, windowMs: 60 * 60 * 1000 });
+// Chaque création de commande PayPal réserve du stock : on limite fortement pour empêcher
+// quelqu'un de bloquer tout le stock sans jamais payer.
+const paypalCreateLimiter = createRequestLimiter({ name: 'paypal-create', max: 6, windowMs: 60 * 60 * 1000 });
 const tokenLookupLimiter = createRequestLimiter({ name: 'token-lookup', max: 40, windowMs: 10 * 60 * 1000 });
 
 // ======================================================================
@@ -322,14 +325,15 @@ function destroySession(req, res) {
   });
 }
 
+// Chaque connexion repart d'une session vierge : on ne recopie JAMAIS le rôle patron/employé
+// ni la cliente précédente (sinon une cliente qui se connecte sur le navigateur du patron
+// hériterait de son accès admin).
 function establishSession(req, values, maxAgeMs) {
   return new Promise((resolve, reject) => {
-    const prev = req.session ? { role: req.session.role, employeeId: req.session.employeeId, roleSince: req.session.roleSince, customerId: req.session.customerId } : {};
     req.session.regenerate((err) => {
       if (err) return reject(err);
-      Object.entries(prev).forEach(([k, v]) => { if (v != null) req.session[k] = v; });
       Object.assign(req.session, values);
-      req.session.cookie.maxAge = Math.max(maxAgeMs, req.session.customerId ? CUSTOMER_SESSION_MS : 0);
+      req.session.cookie.maxAge = maxAgeMs;
       req.session.save((e2) => (e2 ? reject(e2) : resolve()));
     });
   });
@@ -1329,10 +1333,10 @@ function mountRoutes() {
     res.json({ ok: true });
   }));
 
-  app.post('/api/auth/logout', (req, res) => {
-    if (req.session) req.session.customerId = null;
+  app.post('/api/auth/logout', asyncHandler(async (req, res) => {
+    await destroySession(req, res);
     res.json({ ok: true });
-  });
+  }));
 
   app.get('/api/auth/me', asyncHandler(async (req, res) => {
     if (!req.session || !req.session.customerId) return res.json({ customer: null });
@@ -1517,7 +1521,8 @@ function mountRoutes() {
     res.json({ ok: true });
   }));
 
-  app.patch('/api/admin/products/:id/stock', requireStaff, asyncHandler(async (req, res) => {
+  // Droit « stock » requis (ou « catalogue », qui peut déjà changer le stock depuis la fiche produit).
+  app.patch('/api/admin/products/:id/stock', requirePerm('stock', 'catalogue'), asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
     const updates = req.body && req.body.sizes;
     if (!Array.isArray(updates) || updates.length === 0 || updates.length > 300) throw new HttpError(400, 'Liste de tailles requise');
@@ -1754,7 +1759,7 @@ function mountRoutes() {
     return body.id;
   };
 
-  app.post('/api/paypal/create-order', paypalLimiter, asyncHandler(async (req, res) => {
+  app.post('/api/paypal/create-order', paypalLimiter, paypalCreateLimiter, asyncHandler(async (req, res) => {
     const body = req.body || {};
     requireTerms(body);
     const cart = normalizeCart(body.items);

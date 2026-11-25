@@ -568,7 +568,7 @@
     const cats = ['Tout', ...categoriesList()];
     const panel = el('#cat-dropdown-panel');
     panel.innerHTML = cats.map(c =>
-      `<button data-cat="${c}" class="${c === state.activeCategory ? 'active' : ''}">${c}</button>`
+      `<button data-cat="${escapeHtml(c)}" class="${c === state.activeCategory ? 'active' : ''}">${escapeHtml(c)}</button>`
     ).join('');
     panel.querySelectorAll('button').forEach(btn => {
       btn.addEventListener('click', () => selectCategory(btn.dataset.cat, true));
@@ -584,7 +584,7 @@
   function renderFilters() {
     const cats = ['Tout', ...categoriesList()];
     filtersEl.innerHTML = cats.map(c =>
-      `<button class="filter-chip ${c === state.activeCategory ? 'active' : ''}" data-cat="${c}">${c}</button>`
+      `<button class="filter-chip ${c === state.activeCategory ? 'active' : ''}" data-cat="${escapeHtml(c)}">${escapeHtml(c)}</button>`
     ).join('');
     filtersEl.querySelectorAll('.filter-chip').forEach(btn => {
       btn.addEventListener('click', () => selectCategory(btn.dataset.cat, false));
@@ -600,9 +600,9 @@
       const inCat = state.products.filter(p => p.category === c);
       const cover = inCat.find(p => p.imageUrl);
       return `
-        <button type="button" class="tile" data-cat="${c}">
-          ${cover ? `<img src="${cover.imageUrl}" alt="${c}" loading="lazy">` : '<div class="tile-ph"></div>'}
-          <span class="tile-label">${c}<small>${inCat.length} pièce${inCat.length > 1 ? 's' : ''}</small></span>
+        <button type="button" class="tile" data-cat="${escapeHtml(c)}">
+          ${cover ? `<img src="${cover.imageUrl}" alt="${escapeHtml(c)}" loading="lazy">` : '<div class="tile-ph"></div>'}
+          <span class="tile-label">${escapeHtml(c)}<small>${inCat.length} pièce${inCat.length > 1 ? 's' : ''}</small></span>
         </button>
       `;
     }).join('');
